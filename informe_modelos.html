@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Informe de Modelado — WhatsApp Distribuido</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3; --accent: #58a6ff; --green: #3fb950; --heading: #ffffff; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; padding: 40px 20px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        h1 { color: var(--heading); font-size: 2em; text-align: center; margin-bottom: 10px; }
+        h2 { color: var(--accent); font-size: 1.5em; margin-top: 50px; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        h3 { color: var(--green); font-size: 1.15em; margin-top: 30px; margin-bottom: 10px; }
+        p, li { font-size: 0.95em; margin-bottom: 8px; }
+        ul { padding-left: 25px; }
+        .subtitle { text-align: center; color: #8b949e; margin-bottom: 40px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 25px; margin: 20px 0; }
+        .diagram-card { background: #ffffff; border-radius: 10px; padding: 25px; margin: 20px 0; text-align: center; }
+        .diagram-card .mermaid { display: inline-block; text-align: left; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 0.9em; }
+        th { background: var(--accent); color: #000; padding: 10px 12px; text-align: left; }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+        tr:hover td { background: rgba(88,166,255,0.05); }
+        .important { background: rgba(63,185,80,0.1); border-left: 4px solid var(--green); padding: 15px; border-radius: 6px; margin: 15px 0; }
+        .warning { background: rgba(210,153,34,0.1); border-left: 4px solid #d29922; padding: 15px; border-radius: 6px; margin: 15px 0; }
+        code { background: rgba(88,166,255,0.1); padding: 2px 6px; border-radius: 4px; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.9em; }
+        pre { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 15px; overflow-x: auto; font-size: 0.85em; }
+        .step { display: flex; gap: 12px; margin: 8px 0; }
+        .step-num { background: var(--accent); color: #000; min-width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.85em; flex-shrink: 0; margin-top: 2px; }
+        .step-text { flex: 1; }
+        hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+<h1>Informe Completo de Modelado</h1>
+<p class="subtitle">Proyecto "WhatsApp Distribuido" — Computación Paralela y Sistemas Distribuidos</p>
+
+<!-- ========== MODELO FÍSICO ========== -->
+<h2>1. MODELO FÍSICO</h2>
+
+<h3>1.1 Identificación de Nodos</h3>
+<div class="card">
+<table>
+<tr><th>Nodo</th><th>Archivo</th><th>Descripción</th><th>Cantidad</th><th>Puerto</th></tr>
+<tr><td><strong>Servidor Central</strong></td><td><code>server.Servidor.main()</code></td><td>Escucha conexiones TCP con <code>ServerSocket</code>. Mantiene un <code>HashMap</code> con todos los clientes. Enruta mensajes.</td><td>1 (único)</td><td>TCP 5000</td></tr>
+<tr><td><strong>Cliente N</strong></td><td><code>client.Cliente.main()</code></td><td>Interfaz gráfica Swing. Se conecta al servidor con <code>Socket(ip, puerto)</code>. No conoce IPs de otros clientes.</td><td>N (ilimitados)</td><td>Efímero (SO)</td></tr>
+</table>
+
+<p><strong>Hilos internos del Servidor:</strong></p>
+<table>
+<tr><th>Componente</th><th>Clase</th><th>Función</th></tr>
+<tr><td>Hilo Principal</td><td><code>Servidor.main()</code></td><td>Bucle infinito en <code>serverSocket.accept()</code></td></tr>
+<tr><td>Hilo Manejador (1 por cliente)</td><td><code>ManejadorCliente implements Runnable</code></td><td>Lee mensajes del socket de su cliente asignado</td></tr>
+</table>
+
+<p><strong>Hilos internos del Cliente:</strong></p>
+<table>
+<tr><th>Componente</th><th>Clase</th><th>Función</th></tr>
+<tr><td>Hilo Principal (EDT Swing)</td><td><code>Cliente extends JFrame</code></td><td>Interfaz gráfica y eventos del usuario</td></tr>
+<tr><td>Hilo Receptor</td><td><code>HiloReceptor implements Runnable</code></td><td>Bucle leyendo mensajes del socket con <code>readObject()</code></td></tr>
+</table>
+</div>
+
+<h3>1.2 Entorno de Red</h3>
+<div class="card">
+<table>
+<tr><th>Característica</th><th>Valor</th></tr>
+<tr><td>Tipo de Red</td><td><strong>LAN</strong> (Red de Área Local). Conexión por IPv4 privada (ej: 192.168.1.X) o <code>localhost</code></td></tr>
+<tr><td>Protocolo de Transporte</td><td><strong>TCP</strong> — Garantiza entrega ordenada y sin pérdida</td></tr>
+<tr><td>Protocolo de Aplicación</td><td><strong>Serialización de objetos Java</strong> (Marshalling) con <code>ObjectOutputStream</code></td></tr>
+<tr><td>Puerto del Servidor</td><td><code>5000</code> (configurable por argumento)</td></tr>
+<tr><td>Binding</td><td><code>0.0.0.0</code> (acepta conexiones desde cualquier interfaz de red)</td></tr>
+<tr><td>Límite de archivos</td><td>10 MB máximo</td></tr>
+</table>
+</div>
+
+<h3>1.3 Topología de Estrella (Diagrama de Interconexión)</h3>
+<div class="diagram-card">
+<pre class="mermaid">
+graph TB
+    subgraph RED_LAN["Red LAN — 192.168.1.0/24"]
+        S["Servidor Central\nServerSocket TCP:5000\nServidor.java\nIP: 192.168.1.10"]
+        C1["Cliente 1\nSocket TCP\nCliente.java\nIP: 192.168.1.20"]
+        C2["Cliente 2\nSocket TCP\nCliente.java\nIP: 192.168.1.30"]
+        C3["Cliente N\nSocket TCP\nCliente.java\nIP: 192.168.1.X"]
+        C1 -->|"Conexión TCP persistente\nObjectStream bidireccional"| S
+        C2 -->|"Conexión TCP persistente\nObjectStream bidireccional"| S
+        C3 -->|"Conexión TCP persistente\nObjectStream bidireccional"| S
+    end
+</pre>
+</div>
+<div class="important"><strong>No existe comunicación directa entre clientes.</strong> Todo pasa por el servidor (topología de estrella). Cliente 1 → Servidor → Cliente 2.</div>
+
+<h3>1.4 Estructura de Archivos</h3>
+<div class="card">
+<pre>
+Proyecto paralela/
+├── compile.bat              ← Compila todo con javac hacia /bin
+├── run_server.bat           ← java -cp bin server.Servidor 5000
+├── run_client.bat           ← java -cp bin client.Cliente
+├── src/
+│   ├── common/
+│   │   └── Mensaje.java     ← Objeto serializable (protocolo)
+│   ├── server/
+│   │   ├── Servidor.java    ← Punto de entrada del servidor
+│   │   └── ManejadorCliente.java ← Un hilo por cliente
+│   └── client/
+│       └── Cliente.java     ← GUI Swing + HiloReceptor
+├── bin/                     ← Archivos .class compilados
+└── archivos_recibidos/      ← Archivos recibidos por el cliente
+</pre>
+</div>
+
+<hr>
+
+<!-- ========== MODELO ARQUITECTÓNICO ========== -->
+<h2>2. MODELO ARQUITECTÓNICO</h2>
+
+<h3>2.1 Tipo de Arquitectura</h3>
+<div class="card">
+<table>
+<tr><th>Propiedad</th><th>Implementación</th></tr>
+<tr><td>Patrón</td><td>Cliente-Servidor de 2 capas (2-Tier)</td></tr>
+<tr><td>Comunicación</td><td>Sockets TCP con serialización de objetos Java</td></tr>
+<tr><td>Concurrencia</td><td>Thread-per-Connection (un hilo por cliente)</td></tr>
+<tr><td>Sincronización</td><td>Bloques <code>synchronized</code> sobre HashMap y ObjectOutputStream</td></tr>
+<tr><td>Transparencia de Ubicación</td><td>El cliente usa nombres, no IPs, para identificar destinatarios</td></tr>
+<tr><td>Transparencia de Acceso</td><td>Interfaz de envío idéntica sin importar ubicación física</td></tr>
+</table>
+</div>
+
+<h3>2.2 Definición de Capas</h3>
+<div class="diagram-card">
+<pre class="mermaid">
+graph TB
+    subgraph CAPA1["CAPA 1: Presentación — Cliente"]
+        GUI["Interfaz Gráfica Swing\nJFrame, JTextArea, JList, JButton\nTema visual estilo WhatsApp"]
+        EVENTOS["Eventos de Usuario\nActionListener, WindowListener"]
+    end
+    subgraph CAPA2["CAPA 2: Comunicación — Compartida"]
+        MSG["Objeto Mensaje — Serializable\nTipos: TEXTO, ARCHIVO, CONECTAR\nDESCONECTAR, LISTA_USUARIOS, NOTIFICACION"]
+        STREAMS["ObjectOutputStream / ObjectInputStream\nSerialización sobre Socket TCP"]
+    end
+    subgraph CAPA3["CAPA 3: Lógica de Negocio — Servidor"]
+        REGISTRO["Registro de Usuarios\nHashMap con synchronized"]
+        RUTEO["Ruteo de Mensajes\nResolución nombre a ManejadorCliente"]
+        BROADCAST["Broadcast\nNotificaciones y listas a todos"]
+    end
+    subgraph CAPA4["CAPA 4: Concurrencia — Servidor"]
+        HILOS["Thread-per-Connection\nManejadorCliente implements Runnable"]
+        SYNC["Sincronización\nsynchronized en HashMap y Streams"]
+    end
+    CAPA1 --> CAPA2
+    CAPA2 --> CAPA3
+    CAPA3 --> CAPA4
+</pre>
+</div>
+
+<h3>2.3 Diagrama de Clases UML</h3>
+<div class="diagram-card">
+<pre class="mermaid">
+classDiagram
+    class Mensaje {
+        -String emisor
+        -String receptor
+        -String tipo
+        -String contenido
+        -byte[] datosAdjuntos
+        -String nombreArchivo
+        -long timestamp
+        +Mensaje(emisor, receptor, tipo, contenido)
+        +Mensaje(emisor, receptor, nombreArchivo, datosAdjuntos)
+        +getEmisor() String
+        +getReceptor() String
+        +getTipo() String
+        +getContenido() String
+        +getDatosAdjuntos() byte[]
+        +getNombreArchivo() String
+        +getHoraFormateada() String
+    }
+    Mensaje ..|> Serializable : implements
+
+    class Servidor {
+        -HashMap clientesConectados$
+        -int PUERTO_DEFECTO$
+        +main(args)$
+        +registrarCliente(nombre, manejador)$ boolean
+        +removerCliente(nombre)$
+        +reenviarMensaje(mensaje)$
+        +enviarListaUsuarios()$
+        +enviarNotificacion(texto)$
+    }
+
+    class ManejadorCliente {
+        -Socket socket
+        -ObjectOutputStream salida
+        -ObjectInputStream entrada
+        -String nombreUsuario
+        +ManejadorCliente(socket)
+        +run()
+        +enviarMensaje(mensaje)
+        +getNombreUsuario() String
+    }
+    ManejadorCliente ..|> Runnable : implements
+
+    class Cliente {
+        -Socket socket
+        -ObjectOutputStream salida
+        -ObjectInputStream entrada
+        -String nombreUsuario
+        -boolean conectado
+        -JTextArea areaMensajes
+        +Cliente()
+        -construirInterfaz()
+        -mostrarDialogoConexion()
+        -conectar(nombre, ip, puerto)
+        -enviarMensajeTexto()
+        -enviarArchivo()
+        -desconectar()
+    }
+    Cliente --|> JFrame : extends
+
+    class HiloReceptor {
+        +run()
+        -recibirArchivo(mensaje)
+        -actualizarListaUsuarios(listaCSV)
+    }
+    HiloReceptor ..|> Runnable : implements
+    HiloReceptor --* Cliente : clase interna
+
+    Servidor "1" o-- "N" ManejadorCliente : HashMap
+    ManejadorCliente --> Mensaje : lee y escribe
+    Cliente --> Mensaje : crea y envia
+    HiloReceptor --> Mensaje : recibe y procesa
+    ManejadorCliente --> Servidor : invoca metodos estaticos
+</pre>
+</div>
+
+<h3>2.4 Flujo General de Comunicación</h3>
+<div class="diagram-card">
+<pre class="mermaid">
+graph LR
+    A["Cliente A\n— GUI Swing —"] -->|"1. writeObject"| SA["Socket A"]
+    SA -->|"2. TCP/IP LAN"| SS["ServerSocket\npuerto 5000"]
+    SS -->|"3. readObject"| MA["ManejadorCliente A\n— Hilo dedicado —"]
+    MA -->|"4. reenviarMensaje"| MAPA["HashMap\nclientesConectados\nsynchronized"]
+    MAPA -->|"5. Busca destino"| MB["ManejadorCliente B\n— Hilo dedicado —"]
+    MB -->|"6. writeObject"| SB["Socket B"]
+    SB -->|"7. TCP/IP LAN"| B["HiloReceptor B"]
+    B -->|"8. invokeLater"| GUI_B["GUI Cliente B"]
+</pre>
+</div>
+
+<h3>2.5 Protocolo de Mensajes</h3>
+<div class="card">
+<table>
+<tr><th>Tipo</th><th>Dirección</th><th>Propósito</th><th>Campos Utilizados</th></tr>
+<tr><td><code>CONECTAR</code></td><td>Cliente → Servidor</td><td>Login. Primer mensaje obligatorio.</td><td><code>emisor</code> = nombre</td></tr>
+<tr><td><code>DESCONECTAR</code></td><td>Cliente → Servidor</td><td>Cierre voluntario</td><td><code>emisor</code> = nombre</td></tr>
+<tr><td><code>TEXTO</code></td><td>Cliente → Servidor → Cliente</td><td><strong>Función 1:</strong> Mensaje de texto privado</td><td><code>emisor</code>, <code>receptor</code>, <code>contenido</code></td></tr>
+<tr><td><code>ARCHIVO</code></td><td>Cliente → Servidor → Cliente</td><td><strong>Función 2:</strong> Archivo multimedia (≤10 MB)</td><td><code>emisor</code>, <code>receptor</code>, <code>nombreArchivo</code>, <code>datosAdjuntos</code></td></tr>
+<tr><td><code>LISTA_USUARIOS</code></td><td>Servidor → Todos</td><td>Broadcast con nombres separados por coma</td><td><code>contenido</code> = "usr1,usr2,usr3"</td></tr>
+<tr><td><code>NOTIFICACION</code></td><td>Servidor → Cliente(s)</td><td>Mensajes del sistema</td><td><code>contenido</code> = texto</td></tr>
+</table>
+</div>
+
+<hr>
+
+<!-- ========== MODELADO DE FUNCIONES ========== -->
+<h2>3. MODELADO DE FUNCIONES — Diagramas de Secuencia UML</h2>
+
+<h3>3.1 FUNCIÓN 1: Envío y Recepción de Mensaje de Texto</h3>
+<p><strong>Escenario:</strong> Usuario A escribe "Hola" y lo envía a Usuario B. Ambos ya están conectados.</p>
+
+<div class="diagram-card">
+<pre class="mermaid">
+sequenceDiagram
+    participant UA as Cliente A — EDT Swing
+    participant SOA as ObjectOutputStream A
+    participant MA as ManejadorCliente A — Hilo Servidor
+    participant SRV as Servidor — HashMap synchronized
+    participant MB as ManejadorCliente B — Hilo Servidor
+    participant SOB as ObjectOutputStream B
+    participant HRB as HiloReceptor B
+    participant UB as Cliente B — EDT Swing
+
+    UA->>UA: 1. Selecciona "Usuario B" en JList y escribe "Hola"
+    UA->>UA: 2. Crea Mensaje(emisor=A, receptor=B, tipo=TEXTO, contenido=Hola)
+    UA->>SOA: 3. synchronized(salida) writeObject(msg) flush() reset()
+    Note over SOA: MARSHALLING: Objeto Mensaje se convierte a bytes
+    SOA-->>MA: 4. Bytes viajan por TCP/LAN
+    MA->>MA: 5. entrada.readObject() — deserialización
+    Note over MA: UNMARSHALLING: bytes se reconstruyen como Mensaje
+    MA->>MA: 6. switch(tipo) -> case TEXTO
+    MA->>SRV: 7. Servidor.reenviarMensaje(msg)
+    SRV->>SRV: 8. synchronized(clientesConectados) busca "B" en HashMap
+    SRV->>MB: 9. destino.enviarMensaje(msg)
+    MB->>SOB: 10. synchronized(salida) writeObject(msg) flush() reset()
+    Note over SOB: MARSHALLING: Objeto -> bytes nuevamente
+    SOB-->>HRB: 11. Bytes viajan por TCP/LAN
+    HRB->>HRB: 12. entrada.readObject() — deserialización
+    HRB->>HRB: 13. switch -> case TEXTO
+    HRB->>UB: 14. SwingUtilities.invokeLater() areaMensajes.append("A: Hola")
+    Note over UB: Se muestra en pantalla de forma thread-safe
+</pre>
+</div>
+
+<div class="card">
+<h3>Detalles técnicos de cada paso crítico:</h3>
+<div class="step"><div class="step-num">3</div><div class="step-text"><strong><code>synchronized(salida)</code> en el Cliente:</strong> Protege el <code>ObjectOutputStream</code> porque el hilo EDT podría intentar enviar mientras otro envío aún no termina. <code>reset()</code> limpia la caché interna del stream para evitar que Java envíe referencias obsoletas en lugar del objeto actualizado.</div></div>
+<div class="step"><div class="step-num">8</div><div class="step-text"><strong><code>synchronized(clientesConectados)</code>:</strong> Garantiza exclusión mutua. Si otro cliente se conecta al mismo instante, ambas operaciones no pueden tocar el HashMap simultáneamente, evitando condiciones de carrera.</div></div>
+<div class="step"><div class="step-num">14</div><div class="step-text"><strong><code>SwingUtilities.invokeLater()</code>:</strong> El <code>HiloReceptor</code> NO puede modificar componentes Swing directamente (no es thread-safe). Este método encola la actualización para que la ejecute el hilo EDT.</div></div>
+</div>
+
+<h3>3.2 FUNCIÓN 2: Envío y Recepción de Archivo Multimedia</h3>
+<p><strong>Escenario:</strong> Usuario A selecciona un archivo PDF de 2 MB y lo envía a Usuario B.</p>
+
+<div class="diagram-card">
+<pre class="mermaid">
+sequenceDiagram
+    participant UA as Cliente A — EDT Swing
+    participant FS as FileSystem Disco de A
+    participant SOA as ObjectOutputStream A
+    participant MA as ManejadorCliente A — Hilo Servidor
+    participant SRV as Servidor — HashMap synchronized
+    participant MB as ManejadorCliente B — Hilo Servidor
+    participant SOB as ObjectOutputStream B
+    participant HRB as HiloReceptor B
+    participant FSB as FileSystem Disco de B
+    participant UB as Cliente B — EDT Swing
+
+    UA->>UA: 1. Selecciona "Usuario B" y presiona boton Archivo
+    UA->>UA: 2. JFileChooser.showOpenDialog() selecciona informe.pdf
+    UA->>UA: 3. Validacion: archivo.length() debe ser menor a 10 MB
+    UA->>FS: 4. FileInputStream.read(datosArchivo)
+    FS-->>UA: 5. byte[2097152] — 2 MB cargados en memoria
+    UA->>UA: 6. Crea Mensaje(emisor=A, receptor=B, nombre=informe.pdf, datos=byte[2MB])
+    Note over UA: El constructor asigna tipo=ARCHIVO automaticamente
+    UA->>SOA: 7. synchronized(salida) writeObject(msg) flush() reset()
+    Note over SOA: MARSHALLING PESADO: Objeto + 2MB de bytes serializados juntos
+    SOA-->>MA: 8. Bytes viajan por TCP/LAN fragmentados por TCP
+    MA->>MA: 9. readObject() deserializa Mensaje completo con los 2 MB
+    MA->>MA: 10. switch -> case ARCHIVO, log en consola
+    MA->>SRV: 11. Servidor.reenviarMensaje(msg)
+    SRV->>SRV: 12. synchronized(clientesConectados) busca "B"
+    SRV->>MB: 13. destino.enviarMensaje(msg)
+    MB->>SOB: 14. synchronized(salida) writeObject(msg) flush() reset()
+    SOB-->>HRB: 15. Bytes viajan por TCP/LAN
+    HRB->>HRB: 16. readObject() deserializa Mensaje con datosAdjuntos
+    HRB->>HRB: 17. switch -> case ARCHIVO llama recibirArchivo(msg)
+    HRB->>FSB: 18. Crea carpeta archivos_recibidos/ con mkdirs()
+    HRB->>FSB: 19. FileOutputStream.write(datosAdjuntos) guarda informe.pdf
+    FSB-->>HRB: 20. Archivo guardado exitosamente
+    HRB->>UB: 21. SwingUtilities.invokeLater() muestra confirmacion en pantalla
+</pre>
+</div>
+
+<div class="card">
+<h3>Detalles técnicos de cada paso crítico:</h3>
+<div class="step"><div class="step-num">4-5</div><div class="step-text"><strong>Lectura completa en memoria:</strong> El archivo se carga entero en un <code>byte[]</code>. Java serializa los datos binarios junto con el resto del objeto Mensaje de forma atómica (todo o nada).</div></div>
+<div class="step"><div class="step-num">6</div><div class="step-text"><strong>Constructor especial:</strong> Cuando se usa <code>Mensaje(emisor, receptor, nombreArchivo, datosAdjuntos)</code>, el <code>tipo</code> se asigna automáticamente como <code>ARCHIVO</code> en la línea 91 de Mensaje.java.</div></div>
+<div class="step"><div class="step-num">8</div><div class="step-text"><strong>Fragmentación TCP:</strong> Aunque el objeto serializado pese megabytes, TCP se encarga automáticamente de fragmentarlo en paquetes y reensamblarlos en orden. Transparente para el programador.</div></div>
+<div class="step"><div class="step-num">18</div><div class="step-text"><strong>Creación de directorio:</strong> El receptor crea automáticamente <code>archivos_recibidos/</code> con <code>File.mkdirs()</code> si no existe.</div></div>
+</div>
+
+<hr>
+
+<h2>Resumen de Conceptos Implementados</h2>
+<div class="card">
+<table>
+<tr><th>Concepto</th><th>Dónde</th><th>Cómo</th></tr>
+<tr><td>Comunicación TCP</td><td><code>ServerSocket</code>, <code>Socket</code></td><td>Conexiones persistentes bidireccionales</td></tr>
+<tr><td>Marshalling</td><td><code>writeObject()</code>, <code>readObject()</code></td><td>Objetos <code>Mensaje</code> (<code>Serializable</code>) → bytes automáticamente</td></tr>
+<tr><td>Transparencia de Ubicación</td><td><code>Servidor.reenviarMensaje()</code></td><td>Emisor indica solo el nombre. Servidor busca en HashMap.</td></tr>
+<tr><td>Transparencia de Acceso</td><td><code>enviarMensajeTexto()</code>, <code>enviarArchivo()</code></td><td>Interfaz idéntica sin importar ubicación del destinatario</td></tr>
+<tr><td>Concurrencia</td><td><code>ManejadorCliente</code>, <code>HiloReceptor</code></td><td>Un hilo por conexión en servidor; hilo receptor en cliente</td></tr>
+<tr><td>Sincronización</td><td><code>synchronized(clientesConectados)</code>, <code>synchronized(salida)</code></td><td>Exclusión mutua en HashMap y en streams de escritura</td></tr>
+<tr><td>Resiliencia</td><td><code>try-catch-finally</code> en <code>ManejadorCliente.run()</code></td><td>Si un cliente falla, solo su hilo muere. Servidor sigue vivo.</td></tr>
+<tr><td>Prevención de Deadlock</td><td>Orden de inicialización de streams</td><td><code>ObjectOutputStream</code> antes de <code>ObjectInputStream</code></td></tr>
+</table>
+</div>
+
+</div>
+
+<script>
+    mermaid.initialize({ 
+        startOnLoad: true, 
+        theme: 'default',
+        securityLevel: 'loose',
+        sequence: { mirrorActors: false, messageAlign: 'left' }
+    });
+</script>
+</body>
+</html>
