@@ -279,26 +279,35 @@ public class Cliente extends JFrame {
     }
 
     /**
-     * Muestra el diálogo de conexión para ingresar nombre, IP y puerto.
+     * Muestra el diálogo de conexión con autenticación.
+     * El usuario puede elegir entre "Iniciar Sesión" o "Registrarse".
      */
     private void mostrarDialogoConexion() {
-        JPanel panel = new JPanel(new GridLayout(3, 2, 5, 5));
+        JPanel panel = new JPanel(new GridLayout(4, 2, 5, 8));
         JTextField campoNombre = new JTextField("Usuario1");
+        JPasswordField campoPassword = new JPasswordField();
         JTextField campoIP = new JTextField("localhost");
         JTextField campoPuerto = new JTextField("5000");
 
         panel.add(new JLabel("Nombre de usuario:"));
         panel.add(campoNombre);
+        panel.add(new JLabel("Contraseña:"));
+        panel.add(campoPassword);
         panel.add(new JLabel("IP del servidor:"));
         panel.add(campoIP);
         panel.add(new JLabel("Puerto:"));
         panel.add(campoPuerto);
 
-        int resultado = JOptionPane.showConfirmDialog(this, panel,
-                "Conectar al Servidor", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        // Dos botones: Iniciar Sesión y Registrarse
+        String[] opciones = {"Iniciar Sesión", "Registrarse", "Cancelar"};
+        int resultado = JOptionPane.showOptionDialog(this, panel,
+                "Conectar al Servidor",
+                JOptionPane.DEFAULT_OPTION, JOptionPane.PLAIN_MESSAGE,
+                null, opciones, opciones[0]);
 
-        if (resultado == JOptionPane.OK_OPTION) {
+        if (resultado == 0 || resultado == 1) {
             String nombre = campoNombre.getText().trim();
+            String password = new String(campoPassword.getPassword()).trim();
             String ip = campoIP.getText().trim();
             int puerto;
             try {
@@ -312,57 +321,80 @@ public class Cliente extends JFrame {
                 mostrarDialogoConexion();
                 return;
             }
+            if (password.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Ingrese una contraseña.");
+                mostrarDialogoConexion();
+                return;
+            }
 
-            conectar(nombre, ip, puerto);
+            // resultado 0 = LOGIN, resultado 1 = REGISTRO
+            String tipoAuth = (resultado == 0) ? Mensaje.LOGIN : Mensaje.REGISTRO;
+            conectar(nombre, password, ip, puerto, tipoAuth);
         } else {
             System.exit(0);
         }
     }
 
     /**
-     * Establece la conexión TCP con el servidor.
+     * Establece la conexión TCP con el servidor y envía las credenciales.
      * 
-     * COMUNICACIÓN TCP: Se crea un Socket que se conecta al servidor.
-     * Se crean ObjectOutputStream/ObjectInputStream para marshalling.
-     * Se envía un mensaje CONECTAR como primer mensaje del protocolo.
+     * @param nombre    Nombre de usuario
+     * @param password  Contraseña
+     * @param ip        IP del servidor
+     * @param puerto    Puerto del servidor
+     * @param tipoAuth  Mensaje.LOGIN o Mensaje.REGISTRO
      */
-    private void conectar(String nombre, String ip, int puerto) {
+    private void conectar(String nombre, String password, String ip, int puerto, String tipoAuth) {
         try {
-            // ===== COMUNICACIÓN TCP: Conexión al servidor =====
             socket = new Socket(ip, puerto);
 
-            // ===== MARSHALLING: Streams de objetos =====
             salida = new ObjectOutputStream(socket.getOutputStream());
             salida.flush();
             entrada = new ObjectInputStream(socket.getInputStream());
 
             nombreUsuario = nombre;
-            conectado = true;
 
-            // Enviar mensaje de conexión (protocolo de login)
-            Mensaje msgConectar = new Mensaje(nombreUsuario, "SERVIDOR",
-                    Mensaje.CONECTAR, "Solicitud de conexión");
-            salida.writeObject(msgConectar);
+            // Enviar credenciales al servidor (la contraseña viaja en 'contenido')
+            Mensaje msgAuth = new Mensaje(nombreUsuario, "SERVIDOR",
+                    tipoAuth, password);
+            salida.writeObject(msgAuth);
             salida.flush();
 
-            setTitle("WhatsApp 2 Distribuido — " + nombreUsuario);
-            lblEstado.setText("Conectado como: " + nombreUsuario);
-            setVisible(true);
+            // Esperar respuesta de autenticación del servidor
+            Mensaje respuesta = (Mensaje) entrada.readObject();
 
-            agregarMensajeSistema("Conectado al servidor " + ip + ":" + puerto);
+            if (respuesta.getTipo().equals(Mensaje.AUTH_OK)) {
+                // ¡Autenticación exitosa!
+                conectado = true;
+                setTitle("WhatsApp Distribuido — " + nombreUsuario);
+                lblEstado.setText("Conectado como: " + nombreUsuario);
+                setVisible(true);
 
-            // ===== CONCURRENCIA: Hilo receptor =====
-            // Se lanza un hilo separado para escuchar mensajes entrantes
-            // del servidor de forma continua, sin bloquear la interfaz.
-            Thread hiloReceptor = new Thread(new HiloReceptor());
-            hiloReceptor.setDaemon(true);
-            hiloReceptor.start();
+                agregarMensajeSistema(respuesta.getContenido());
+
+                // Lanzar hilo receptor para escuchar mensajes
+                Thread hiloReceptor = new Thread(new HiloReceptor());
+                hiloReceptor.setDaemon(true);
+                hiloReceptor.start();
+
+            } else if (respuesta.getTipo().equals(Mensaje.AUTH_FAIL)) {
+                // Autenticación fallida
+                socket.close();
+                JOptionPane.showMessageDialog(this,
+                        respuesta.getContenido(),
+                        "Error de Autenticación", JOptionPane.ERROR_MESSAGE);
+                mostrarDialogoConexion();
+            }
 
         } catch (IOException e) {
-            // ===== RESILIENCIA: Fallo de conexión =====
             JOptionPane.showMessageDialog(this,
                     "No se pudo conectar al servidor:\n" + e.getMessage(),
                     "Error de Conexión", JOptionPane.ERROR_MESSAGE);
+            mostrarDialogoConexion();
+        } catch (ClassNotFoundException e) {
+            JOptionPane.showMessageDialog(this,
+                    "Error de comunicación con el servidor.",
+                    "Error", JOptionPane.ERROR_MESSAGE);
             mostrarDialogoConexion();
         }
     }

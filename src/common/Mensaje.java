@@ -45,11 +45,15 @@ public class Mensaje implements Serializable {
     public static final String ARCHIVO = "ARCHIVO";  // Función 2: Envío de archivos multimedia
 
     // Tipos de control del sistema (señalización interna):
-    public static final String CONECTAR        = "CONECTAR";        // Cliente solicita conexión
+    public static final String CONECTAR        = "CONECTAR";        // Cliente solicita conexión (legacy)
+    public static final String LOGIN           = "LOGIN";           // Cliente solicita inicio de sesión
+    public static final String REGISTRO        = "REGISTRO";        // Cliente solicita crear cuenta nueva
     public static final String DESCONECTAR     = "DESCONECTAR";     // Cliente notifica desconexión
     public static final String LISTA_USUARIOS  = "LISTA_USUARIOS";  // Servidor envía lista de conectados
     public static final String LISTA_OFFLINE   = "LISTA_OFFLINE";   // Servidor envía lista de desconectados
     public static final String NOTIFICACION    = "NOTIFICACION";    // Notificaciones del sistema
+    public static final String AUTH_OK         = "AUTH_OK";         // Autenticación exitosa
+    public static final String AUTH_FAIL       = "AUTH_FAIL";       // Autenticación fallida
 
     // ===== CAMPOS DEL MENSAJE =====
     private String emisor;          // Quién envía

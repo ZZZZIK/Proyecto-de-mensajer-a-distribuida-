@@ -40,12 +40,15 @@ import java.util.List;
  * problema del "Consumidor Lento" donde un cliente con lag congelaba
  * todo el servidor.
  * 
- * BUZÓN OFFLINE (Mensajería asíncrona):
- * Si un destinatario no está conectado, los mensajes se almacenan en una
- * "bodega offline" (HashMap<String, LinkedList<Mensaje>>) con un límite
- * máximo de mensajes por usuario (estilo "Buzón de Voz"). Cuando el
- * usuario vuelve a conectarse, los mensajes pendientes se inyectan en
- * su buzón vivo y se libera la memoria de la bodega.
+ * PERSISTENCIA (MySQL via GestorBD):
+ * El registro de usuarios y los mensajes offline ahora se almacenan en
+ * una base de datos MySQL en lugar de variables en RAM. Esto permite que
+ * los datos sobrevivan reinicios del servidor y escalen a gran volumen.
+ * La clase GestorBD (Patrón DAO) encapsula toda la lógica JDBC.
+ * 
+ * AUTENTICACIÓN:
+ * Los clientes deben iniciar sesión (LOGIN) o registrarse (REGISTRO)
+ * con nombre de usuario y contraseña antes de poder chatear.
  * 
  * SINCRONIZACIÓN:
  * La lista de clientes conectados (HashMap) es un recurso compartido
@@ -69,70 +72,17 @@ public class Servidor {
     /**
      * ===== SINCRONIZACIÓN: Recurso compartido protegido =====
      * 
-     * Este HashMap almacena todos los clientes conectados, mapeando
+     * Este HashMap almacena los clientes ACTUALMENTE CONECTADOS, mapeando
      * el nombre de usuario a su ManejadorCliente correspondiente.
      * 
-     * Es accedido por MÚLTIPLES HILOS concurrentemente (cada ManejadorCliente
-     * puede registrar, remover o buscar clientes). Por eso, todos los métodos
-     * que acceden a este mapa están protegidos con synchronized.
-     * 
-     * Se usa synchronized en vez de ConcurrentHashMap para demostrar
-     * explícitamente el mecanismo de sincronización requerido.
+     * NOTA: Este es el ÚNICO recurso en RAM. El registro permanente de
+     * usuarios y los mensajes offline ahora viven en MySQL (GestorBD).
      */
     private static final HashMap<String, ManejadorCliente> clientesConectados = new HashMap<>();
 
     /**
-     * ===== BUZÓN OFFLINE: Bodega de mensajes para usuarios desconectados =====
-     * 
-     * Este HashMap almacena los mensajes pendientes para usuarios que NO están
-     * conectados actualmente. Funciona como una "Oficina de Correos Central":
-     * 
-     * - Clave: Nombre del usuario destinatario (String)
-     * - Valor: Lista de mensajes pendientes (LinkedList<Mensaje>)
-     * 
-     * Cuando un usuario se conecta (registrarCliente), se revisa esta bodega.
-     * Si tiene mensajes pendientes, se inyectan en su buzón vivo y se elimina
-     * la entrada para liberar memoria.
-     * 
-     * LÍMITE: Cada usuario puede tener como máximo MAX_MENSAJES_OFFLINE mensajes
-     * acumulados. Si se excede el límite, los nuevos mensajes se rechazan y se
-     * notifica al emisor (estilo "Buzón de Voz").
-     * 
-     * SINCRONIZACIÓN: Se protege con el mismo candado (clientesConectados) para
-     * evitar condiciones de carrera entre la verificación de conexión y el
-     * almacenamiento offline.
-     */
-    private static final HashMap<String, LinkedList<Mensaje>> mensajesOffline = new HashMap<>();
-
-    /**
-     * Límite máximo de mensajes que se pueden almacenar en el buzón offline
-     * de un usuario desconectado. Si se excede este límite, los nuevos
-     * mensajes se rechazan (estilo "Buzón de Voz").
-     */
-    private static final int MAX_MENSAJES_OFFLINE = 5;
-
-    /**
-     * ===== REGISTRO PERMANENTE DE USUARIOS =====
-     * 
-     * Este HashSet almacena los nombres de TODOS los usuarios que se han
-     * conectado alguna vez al servidor. Sirve para:
-     * 
-     * 1. Mostrar la lista de usuarios desconectados en la interfaz.
-     * 2. Validar que el destinatario de un mensaje offline realmente
-     *    existe (ha iniciado sesión al menos una vez). Si alguien
-     *    intenta enviar un mensaje a un nombre que nunca se ha registrado,
-     *    el servidor rechaza el mensaje con un error.
-     * 
-     * NOTA: Este registro es en memoria y se pierde al reiniciar el servidor.
-     * Para persistencia real, se necesitaría guardar en un archivo o base de datos.
-     */
-    private static final HashSet<String> usuariosRegistrados = new HashSet<>();
-
-    /**
      * Punto de entrada del servidor.
-     * Crea un ServerSocket TCP y entra en un bucle infinito aceptando conexiones.
-     * 
-     * @param args Opcionalmente el puerto como primer argumento
+     * Verifica la conexión a MySQL y luego acepta conexiones de clientes.
      */
     public static void main(String[] args) {
         int puerto = PUERTO_DEFECTO;
@@ -144,49 +94,48 @@ public class Servidor {
             }
         }
 
+        // ===== PERSISTENCIA: Verificar conexión a MySQL =====
+        // Antes de aceptar clientes, verificamos que la BD esté disponible.
+        System.out.println("============================================");
+        System.out.println("  SERVIDOR WHATSAPP DISTRIBUIDO");
+        System.out.println("============================================");
+        System.out.println("[SERVIDOR] Verificando conexión a MySQL...");
+
+        if (!GestorBD.verificarConexion()) {
+            System.err.println("[SERVIDOR] No se pudo conectar a MySQL. Abortando.");
+            System.err.println("[SERVIDOR] Asegúrate de:");
+            System.err.println("  1. Tener XAMPP abierto con MySQL encendido.");
+            System.err.println("  2. Haber ejecutado el script SQL (database/chat_distribuido.sql).");
+            return;
+        }
+
         ServerSocket serverSocket = null;
 
         try {
-            // ===== COMUNICACIÓN TCP: Creación del ServerSocket =====
-            // ServerSocket escucha conexiones entrantes en el puerto especificado.
-            // Esto establece el punto de entrada del sistema distribuido.
             serverSocket = new ServerSocket(puerto);
 
-            System.out.println("SERVIDOR WHATSAPP DISTRIBUIDO INICIADO");
-            System.out.println("Puerto: " + puerto);
-            System.out.println("Esperando conexiones de clientes...");
+            System.out.println("[SERVIDOR] Puerto: " + puerto);
+            System.out.println("[SERVIDOR] Base de datos: chat_distribuido (MySQL)");
+            System.out.println("[SERVIDOR] Esperando conexiones de clientes...");
+            System.out.println("============================================");
 
-
-            // Bucle principal: acepta conexiones indefinidamente
             while (true) {
-                // ===== COMUNICACIÓN TCP: Aceptar conexión entrante =====
-                // accept() es BLOQUEANTE: el hilo principal se detiene aquí
-                // hasta que un nuevo cliente se conecte via Socket.
                 Socket socketCliente = serverSocket.accept();
 
                 System.out.println("[SERVIDOR] Nueva conexión desde: " +
                         socketCliente.getInetAddress().getHostAddress() + ":" +
                         socketCliente.getPort());
 
-                // ===== CONCURRENCIA: Un hilo por cliente =====
-                // Se crea una nueva instancia de ManejadorCliente (Runnable)
-                // y se lanza en un Thread independiente. Cada cliente tiene
-                // su propio hilo de ejecución, permitiendo atender a todos
-                // de forma concurrente.
                 ManejadorCliente manejador = new ManejadorCliente(socketCliente);
                 Thread hiloCliente = new Thread(manejador);
-                hiloCliente.setDaemon(true); // Hilo daemon: termina cuando el servidor termina
+                hiloCliente.setDaemon(true);
                 hiloCliente.start();
             }
 
         } catch (IOException e) {
-            // ===== RESILIENCIA: Manejo de fallo fatal del servidor =====
-            // Si el ServerSocket falla (puerto ocupado, error de red, etc.),
-            // se captura la excepción y se muestra un mensaje de error claro.
             System.err.println("[SERVIDOR] Error fatal del servidor: " + e.getMessage());
             e.printStackTrace();
         } finally {
-            // Cierre del ServerSocket en caso de error
             if (serverSocket != null && !serverSocket.isClosed()) {
                 try {
                     serverSocket.close();
@@ -199,50 +148,35 @@ public class Servidor {
     }
 
     // =====================================================================
-    // MÉTODOS SINCRONIZADOS PARA GESTIÓN DE CLIENTES
-    // Todos estos métodos usan synchronized para proteger el HashMap
-    // compartido de accesos concurrentes desde múltiples hilos.
+    // MÉTODOS SINCRONIZADOS PARA GESTIÓN DE CLIENTES EN MEMORIA
+    // Estos métodos gestionan SOLO la lista de clientes conectados (RAM).
+    // La persistencia de usuarios y mensajes offline la maneja GestorBD.
     // =====================================================================
 
     /**
-     * Registra un nuevo cliente en el sistema.
+     * Registra un cliente en la lista de conectados EN MEMORIA.
+     * Este método se llama DESPUÉS de que la autenticación (login/registro)
+     * fue exitosa en la base de datos.
      * 
-     * SINCRONIZACIÓN: El bloque synchronized garantiza que solo un hilo
-     * a la vez pueda modificar el mapa de clientes, evitando condiciones
-     * de carrera cuando múltiples clientes se conectan simultáneamente.
-     * 
-     * @param nombre    Nombre de usuario del cliente
+     * @param nombre    Nombre de usuario autenticado
      * @param manejador Instancia del ManejadorCliente asociado
-     * @return true si el registro fue exitoso, false si el nombre ya existe
+     * @return true si se registró correctamente, false si ya está conectado
      */
-    public static boolean registrarCliente(String nombre, ManejadorCliente manejador) {
-        List<Mensaje> mensajesPendientes = null;
-
+    public static boolean registrarClienteEnMemoria(String nombre, ManejadorCliente manejador) {
         synchronized (clientesConectados) {
-            // Verificar si el nombre de usuario ya está en uso
             if (clientesConectados.containsKey(nombre)) {
                 System.out.println("[SERVIDOR] Registro rechazado: '" + nombre + "' ya está conectado.");
                 return false;
             }
             clientesConectados.put(nombre, manejador);
-
-            // ===== REGISTRO PERMANENTE: Guardar el nombre como usuario conocido =====
-            usuariosRegistrados.add(nombre);
-
-            System.out.println("[SERVIDOR] Cliente registrado: " + nombre +
-                    " (Total conectados: " + clientesConectados.size() +
-                    ", Total registrados: " + usuariosRegistrados.size() + ")");
-
-            // ===== BUZÓN OFFLINE: Entregar mensajes pendientes =====
-            if (mensajesOffline.containsKey(nombre)) {
-                mensajesPendientes = mensajesOffline.remove(nombre);
-                System.out.println("[SERVIDOR] Buzón offline de '" + nombre +
-                        "': " + mensajesPendientes.size() + " mensajes pendientes encontrados.");
-            }
+            System.out.println("[SERVIDOR] Cliente conectado: " + nombre +
+                    " (Total online: " + clientesConectados.size() + ")");
         }
 
-        // ===== FUERA del candado: inyectar mensajes pendientes al buzón vivo =====
-        if (mensajesPendientes != null) {
+        // ===== PERSISTENCIA: Entregar mensajes offline desde la BD =====
+        List<Mensaje> mensajesPendientes = GestorBD.obtenerYBorrarMensajesOffline(nombre);
+
+        if (!mensajesPendientes.isEmpty()) {
             Mensaje avisoOffline = new Mensaje("SERVIDOR", nombre,
                     Mensaje.NOTIFICACION,
                     "📬 Tienes " + mensajesPendientes.size() +
@@ -264,20 +198,13 @@ public class Servidor {
 
     /**
      * Elimina un cliente del sistema (desconexión o fallo).
-     * 
-     * RESILIENCIA: Este método se llama tanto en desconexiones voluntarias
-     * como en fallos de red (IOException en el ManejadorCliente). El sistema
-     * limpia los recursos y continúa operando normalmente.
-     * 
-     * @param nombre Nombre del usuario a remover
      */
     public static void removerCliente(String nombre) {
         synchronized (clientesConectados) {
             clientesConectados.remove(nombre);
             System.out.println("[SERVIDOR] Cliente removido: " + nombre +
-                    " (Total conectados: " + clientesConectados.size() + ")");
+                    " (Total online: " + clientesConectados.size() + ")");
         }
-        // Notificar a los demás las listas actualizadas y la desconexión
         enviarListaUsuarios();
         enviarListaOffline();
         enviarNotificacion(nombre + " se ha desconectado.");
@@ -285,26 +212,15 @@ public class Servidor {
 
     /**
      * Reenvía un mensaje al destinatario correcto.
-     * 
-     * TRANSPARENCIA DE UBICACIÓN: El emisor solo indica el NOMBRE del
-     * destinatario en el campo "receptor" del Mensaje. Este método
-     * resuelve internamente la ubicación del destinatario buscándolo
-     * en el mapa de clientes conectados y reenviando el mensaje a
-     * través de su ManejadorCliente. El emisor nunca necesita conocer
-     * la IP o el puerto del destinatario.
-     * 
-     * TRANSPARENCIA DE ACCESO: El mecanismo de envío es idéntico
-     * independientemente de dónde se encuentre el destinatario
-     * (misma máquina, misma red, red remota).
-     * 
-     * @param mensaje Objeto Mensaje a reenviar
+     * Si está conectado, lo deposita en su buzón vivo.
+     * Si está desconectado pero registrado, lo guarda en MySQL.
+     * Si no existe, rechaza con error.
      */
     public static void reenviarMensaje(Mensaje mensaje) {
         String receptor = mensaje.getReceptor();
         ManejadorCliente emisor = null;
 
         synchronized (clientesConectados) {
-            // Buscar el destinatario en el mapa de clientes conectados
             ManejadorCliente destino = clientesConectados.get(receptor);
 
             if (destino != null) {
@@ -315,54 +231,40 @@ public class Servidor {
                 return;
             }
 
-            // ===== VALIDACIÓN: ¿El usuario existe en el registro permanente? =====
-            // Si el destinatario nunca se ha conectado al servidor, rechazamos
-            // el mensaje con un error claro.
-            if (!usuariosRegistrados.contains(receptor)) {
-                emisor = clientesConectados.get(mensaje.getEmisor());
-                if (emisor != null) {
-                    Mensaje error = new Mensaje("SERVIDOR", mensaje.getEmisor(),
-                            Mensaje.NOTIFICACION,
-                            "❌ El usuario '" + receptor + "' no existe en el chat.");
-                    emisor.enviarMensaje(error);
-                }
-                System.out.println("[SERVIDOR] Usuario '" + receptor +
-                        "' no existe. Mensaje de '" + mensaje.getEmisor() + "' rechazado.");
-                return;
-            }
-
-            // ===== Destinatario DESCONECTADO pero REGISTRADO: Guardar offline =====
             emisor = clientesConectados.get(mensaje.getEmisor());
-
-            LinkedList<Mensaje> buzonOffline = mensajesOffline.get(receptor);
-            if (buzonOffline == null) {
-                buzonOffline = new LinkedList<>();
-                mensajesOffline.put(receptor, buzonOffline);
-            }
-
-            // ===== ESTILO BUZÓN DE VOZ: Verificar límite =====
-            if (buzonOffline.size() >= MAX_MENSAJES_OFFLINE) {
-                if (emisor != null) {
-                    Mensaje error = new Mensaje("SERVIDOR", mensaje.getEmisor(),
-                            Mensaje.NOTIFICACION,
-                            "⚠ El buzón offline de '" + receptor +
-                            "' está lleno (Máx " + MAX_MENSAJES_OFFLINE +
-                            "). Mensaje no entregado.");
-                    emisor.enviarMensaje(error);
-                }
-                System.out.println("[SERVIDOR] Buzón offline de '" + receptor +
-                        "' lleno. Mensaje de '" + mensaje.getEmisor() + "' rechazado.");
-                return;
-            }
-
-            // ===== Hay espacio: guardar el mensaje en la bodega offline =====
-            buzonOffline.add(mensaje);
-            System.out.println("[SERVIDOR] Mensaje de '" + mensaje.getEmisor() +
-                    "' guardado en buzón offline de '" + receptor +
-                    "' (" + buzonOffline.size() + "/" + MAX_MENSAJES_OFFLINE + ")");
         }
 
-        // ===== FUERA del candado: notificar al emisor =====
+        // ===== FUERA del candado: operaciones de BD (pueden tardar) =====
+
+        // ===== VALIDACIÓN: ¿El usuario existe en la BD? =====
+        if (!GestorBD.usuarioExiste(receptor)) {
+            if (emisor != null) {
+                Mensaje error = new Mensaje("SERVIDOR", mensaje.getEmisor(),
+                        Mensaje.NOTIFICACION,
+                        "❌ El usuario '" + receptor + "' no existe en el chat.");
+                emisor.enviarMensaje(error);
+            }
+            System.out.println("[SERVIDOR] Usuario '" + receptor +
+                    "' no existe. Mensaje de '" + mensaje.getEmisor() + "' rechazado.");
+            return;
+        }
+
+        // ===== PERSISTENCIA: Guardar en buzón offline (MySQL) =====
+        boolean guardado = GestorBD.guardarMensajeOffline(mensaje);
+
+        if (!guardado) {
+            // Buzón lleno (100 mensajes)
+            if (emisor != null) {
+                Mensaje error = new Mensaje("SERVIDOR", mensaje.getEmisor(),
+                        Mensaje.NOTIFICACION,
+                        "⚠ El buzón offline de '" + receptor +
+                        "' está lleno (Máx 100). Mensaje no entregado.");
+                emisor.enviarMensaje(error);
+            }
+            return;
+        }
+
+        // Notificar al emisor que se guardó en offline
         if (emisor != null) {
             Mensaje aviso = new Mensaje("SERVIDOR", mensaje.getEmisor(),
                     Mensaje.NOTIFICACION,
@@ -373,33 +275,17 @@ public class Servidor {
 
     /**
      * Envía la lista actualizada de usuarios conectados a TODOS los clientes.
-     * 
-     * Se envía como un Mensaje de tipo LISTA_USUARIOS, donde el contenido
-     * es una cadena con los nombres separados por comas.
-     * 
-     * PATRÓN MESSAGE QUEUE: Se copia la lista de clientes bajo el candado
-     * (operación en RAM, tarda microsegundos) y se suelta el candado
-     * INMEDIATAMENTE. Luego se depositan los mensajes en los buzones
-     * de cada cliente FUERA del candado. Como enviarMensaje() ahora
-     * solo hace un offer() al buzón (RAM), esta operación jamás se
-     * bloquea por culpa de una conexión de red lenta.
      */
     public static void enviarListaUsuarios() {
         List<ManejadorCliente> clientesCopia;
         Mensaje msgLista;
 
         synchronized (clientesConectados) {
-            // Construir la lista de nombres separados por coma
             String lista = String.join(",", clientesConectados.keySet());
             msgLista = new Mensaje("SERVIDOR", "TODOS",
                     Mensaje.LISTA_USUARIOS, lista);
-
-            // Copiar la lista de clientes (operación en RAM, instantánea)
             clientesCopia = new ArrayList<>(clientesConectados.values());
         }
-        // ===== FUERA del candado: depositar mensajes en los buzones =====
-        // El candado global ya fue liberado. Ahora podemos iterar
-        // tranquilamente sin bloquear a nadie.
         for (ManejadorCliente cliente : clientesCopia) {
             cliente.enviarMensaje(msgLista);
         }
@@ -407,8 +293,6 @@ public class Servidor {
 
     /**
      * Envía una notificación del sistema a todos los clientes conectados.
-     * 
-     * @param texto Texto de la notificación
      */
     public static void enviarNotificacion(String texto) {
         List<ManejadorCliente> clientesCopia;
@@ -417,7 +301,6 @@ public class Servidor {
         synchronized (clientesConectados) {
             notificacion = new Mensaje("SERVIDOR", "TODOS",
                     Mensaje.NOTIFICACION, texto);
-
             clientesCopia = new ArrayList<>(clientesConectados.values());
         }
         for (ManejadorCliente cliente : clientesCopia) {
@@ -428,19 +311,21 @@ public class Servidor {
     /**
      * Envía la lista de usuarios DESCONECTADOS (offline) a todos los clientes.
      * 
-     * Calcula la diferencia entre usuariosRegistrados (todos los que han
-     * existido) y clientesConectados (los que están online ahora).
-     * El resultado son los usuarios que se han registrado alguna vez
-     * pero actualmente no están conectados.
+     * PERSISTENCIA: Ahora consulta la BD (GestorBD.obtenerUsuariosRegistrados)
+     * para obtener todos los usuarios que se han registrado alguna vez,
+     * y calcula la diferencia con los conectados actualmente.
      */
     public static void enviarListaOffline() {
         List<ManejadorCliente> clientesCopia;
         Mensaje msgOffline;
 
+        // Obtener todos los registrados desde MySQL
+        List<String> todosRegistrados = GestorBD.obtenerUsuariosRegistrados();
+
         synchronized (clientesConectados) {
             // Calcular usuarios offline = registrados - conectados
             List<String> offline = new ArrayList<>();
-            for (String registrado : usuariosRegistrados) {
+            for (String registrado : todosRegistrados) {
                 if (!clientesConectados.containsKey(registrado)) {
                     offline.add(registrado);
                 }
@@ -449,7 +334,6 @@ public class Servidor {
             String listaOffline = String.join(",", offline);
             msgOffline = new Mensaje("SERVIDOR", "TODOS",
                     Mensaje.LISTA_OFFLINE, listaOffline);
-
             clientesCopia = new ArrayList<>(clientesConectados.values());
         }
         for (ManejadorCliente cliente : clientesCopia) {
