@@ -7,62 +7,8 @@ import java.util.*;
 import java.util.List;
 
 /**
- * =====================================================================
- * SERVIDOR CENTRAL DEL SISTEMA DISTRIBUIDO
- * =====================================================================
- * 
- * TRANSPARENCIA DE UBICACIÓN:
- * El servidor actúa como punto central de comunicación (arquitectura
- * cliente-servidor). Los clientes NO necesitan conocer la dirección IP
- * ni el puerto de otros clientes. Solo conocen la dirección del servidor.
- * El servidor resuelve internamente la ubicación de cada destinatario
- * consultando su mapa de clientes conectados. Esto implementa
- * transparencia de ubicación: el cliente envía un mensaje indicando
- * solo el NOMBRE del destinatario, sin saber dónde está físicamente.
- * 
- * TRANSPARENCIA DE ACCESO:
- * El cliente interactúa con el sistema enviando objetos Mensaje de forma
- * uniforme, sin importar si el destinatario está en la misma máquina,
- * en la misma red, o en un host remoto. La interfaz de acceso es
- * siempre la misma: crear un Mensaje y enviarlo por el socket.
- * 
- * CONCURRENCIA — Modelo "Dos hilos por cliente":
- * Por cada conexión entrante, el servidor crea una nueva instancia de
- * ManejadorCliente con DOS hilos independientes: un Hilo Enviador que
- * escucha al cliente, y un Hilo Receptor que despacha mensajes desde
- * un buzón (LinkedBlockingQueue) hacia la red del cliente.
- * 
- * PATRÓN MESSAGE QUEUE (BUZÓN):
- * Los métodos de broadcast (enviarListaUsuarios, enviarNotificacion)
- * depositan mensajes en los buzones de cada cliente en lugar de enviarlos
- * directamente por la red. Esto permite que el candado global (synchronized)
- * se mantenga solo por microsegundos (operaciones en RAM), eliminando el
- * problema del "Consumidor Lento" donde un cliente con lag congelaba
- * todo el servidor.
- * 
- * PERSISTENCIA (MySQL via GestorBD):
- * El registro de usuarios y los mensajes offline ahora se almacenan en
- * una base de datos MySQL en lugar de variables en RAM. Esto permite que
- * los datos sobrevivan reinicios del servidor y escalen a gran volumen.
- * La clase GestorBD (Patrón DAO) encapsula toda la lógica JDBC.
- * 
- * AUTENTICACIÓN:
- * Los clientes deben iniciar sesión (LOGIN) o registrarse (REGISTRO)
- * con nombre de usuario y contraseña antes de poder chatear.
- * 
- * SINCRONIZACIÓN:
- * La lista de clientes conectados (HashMap) es un recurso compartido
- * accedido por múltiples hilos concurrentemente. Se protege con bloques
- * synchronized para evitar condiciones de carrera (race conditions).
- * El candado se mantiene solo durante operaciones en RAM (buscar, copiar)
- * y NUNCA durante operaciones de red, garantizando que jamás se bloquee.
- * 
- * RESILIENCIA — Manejo de fallos independientes:
- * Si un cliente se desconecta o su hilo falla, el servidor no se cae.
- * Solo el hilo afectado termina, los demás clientes continúan operando.
- * El servidor limpia los recursos del cliente desconectado y notifica
- * a los demás usuarios.
- * =====================================================================
+ * Servidor principal de la aplicación de mensajería.
+ * Maneja las conexiones entrantes y mantiene un registro de los clientes conectados.
  */
 public class Servidor {
 
@@ -70,13 +16,8 @@ public class Servidor {
     private static final int PUERTO_DEFECTO = 5000;
 
     /**
-     * ===== SINCRONIZACIÓN: Recurso compartido protegido =====
-     * 
-     * Este HashMap almacena los clientes ACTUALMENTE CONECTADOS, mapeando
-     * el nombre de usuario a su ManejadorCliente correspondiente.
-     * 
-     * NOTA: Este es el ÚNICO recurso en RAM. El registro permanente de
-     * usuarios y los mensajes offline ahora viven en MySQL (GestorBD).
+     * Mapa de clientes actualmente conectados en memoria.
+     * Llave: nombre de usuario, Valor: manejador del cliente.
      */
     private static final HashMap<String, ManejadorCliente> clientesConectados = new HashMap<>();
 
@@ -94,8 +35,7 @@ public class Servidor {
             }
         }
 
-        // ===== PERSISTENCIA: Verificar conexión a MySQL =====
-        // Antes de aceptar clientes, verificamos que la BD esté disponible.
+        // Verificar conexión a la base de datos antes de iniciar
         System.out.println("============================================");
         System.out.println("  SERVIDOR WHATSAPP DISTRIBUIDO");
         System.out.println("============================================");
@@ -147,25 +87,14 @@ public class Servidor {
         }
     }
 
-    // =====================================================================
-    // MÉTODOS SINCRONIZADOS PARA GESTIÓN DE CLIENTES EN MEMORIA
-    // Estos métodos gestionan SOLO la lista de clientes conectados (RAM).
-    // La persistencia de usuarios y mensajes offline la maneja GestorBD.
-    // =====================================================================
 
     /**
-     * Registra un cliente en la lista de conectados EN MEMORIA.
-     * Este método se llama DESPUÉS de que la autenticación (login/registro)
-     * fue exitosa en la base de datos.
+     * Registra a un usuario recién conectado en la memoria del servidor.
+     * Envía primero el historial y luego los mensajes no leídos.
      * 
-     * ORDEN DE CARGA AL CONECTARSE:
-     * 1. Primero se envía el HISTORIAL completo de conversaciones.
-     * 2. Luego se envían los mensajes del BUZÓN OFFLINE (no leídos).
-     * Esto permite que el usuario vea el contexto pasado y luego los nuevos.
-     * 
-     * @param nombre    Nombre de usuario autenticado
-     * @param manejador Instancia del ManejadorCliente asociado
-     * @return true si se registró correctamente, false si ya está conectado
+     * @param nombre Nombre de usuario
+     * @param manejador Instancia del hilo que maneja al cliente
+     * @return true si se registró exitosamente
      */
     public static boolean registrarClienteEnMemoria(String nombre, ManejadorCliente manejador) {
         synchronized (clientesConectados) {
@@ -178,7 +107,7 @@ public class Servidor {
                     " (Total online: " + clientesConectados.size() + ")");
         }
 
-        // ===== PASO 1: Enviar HISTORIAL de conversaciones (permanente) =====
+        // 1. Enviar historial de conversaciones permanentes
         List<Mensaje> historial = GestorBD.obtenerHistorialUsuario(nombre);
 
         if (!historial.isEmpty()) {
@@ -193,7 +122,7 @@ public class Servidor {
             System.out.println("[SERVIDOR] Historial enviado a '" + nombre + "': " + historial.size() + " mensajes.");
         }
 
-        // ===== PASO 2: Enviar BUZÓN OFFLINE (mensajes no leídos, se borran) =====
+        // 2. Enviar y borrar mensajes del buzón offline
         List<Mensaje> mensajesPendientes = GestorBD.obtenerYBorrarMensajesOffline(nombre);
 
         if (!mensajesPendientes.isEmpty()) {
@@ -233,11 +162,8 @@ public class Servidor {
     }
 
     /**
-     * Reenvía un mensaje al destinatario correcto.
-     * 
-     * Si está conectado → envío en vivo + historial.
-     * Si está desconectado → solo buzón offline (historial se guarda al entregar).
-     * Si no existe → rechaza con error.
+     * Intenta reenviar un mensaje a su destinatario.
+     * Si está conectado, se le envía. Si no, se guarda en su buzón offline.
      */
     public static void reenviarMensaje(Mensaje mensaje) {
         String receptor = mensaje.getReceptor();
@@ -247,12 +173,12 @@ public class Servidor {
             ManejadorCliente destino = clientesConectados.get(receptor);
 
             if (destino != null) {
-                // ===== Destinatario CONECTADO: reenviar al buzón vivo =====
+                // Destinatario conectado: enviar y guardar en historial
                 destino.enviarMensaje(mensaje);
                 System.out.println("[SERVIDOR] Mensaje reenviado: " + mensaje.getEmisor() +
                         " -> " + receptor + " [" + mensaje.getTipo() + "]");
 
-                // ===== HISTORIAL: Guardar permanentemente (cifrado) =====
+                // Guardar en historial permanente
                 GestorBD.guardarMensajeHistorial(mensaje);
                 return;
             }
@@ -260,9 +186,7 @@ public class Servidor {
             emisor = clientesConectados.get(mensaje.getEmisor());
         }
 
-        // ===== FUERA del candado: operaciones de BD (pueden tardar) =====
-
-        // ===== VALIDACIÓN: ¿El usuario existe en la BD? =====
+        // Validar si el usuario existe en BD
         if (!GestorBD.usuarioExiste(receptor)) {
             if (emisor != null) {
                 Mensaje error = new Mensaje("SERVIDOR", mensaje.getEmisor(),
@@ -275,14 +199,10 @@ public class Servidor {
             return;
         }
 
-        // NOTA: NO guardamos en historial aquí. Se guardará cuando
-        // el usuario se reconecte y se le entregue del buzón.
-
-        // ===== BUZÓN OFFLINE: Guardar temporalmente (cifrado) =====
+        // Guardar mensaje para cuando se conecte
         int resultado = GestorBD.guardarMensajeOffline(mensaje);
 
         if (resultado == 1) {
-            // Buzón lleno (100 mensajes)
             if (emisor != null) {
                 Mensaje error = new Mensaje("SERVIDOR", mensaje.getEmisor(),
                         Mensaje.NOTIFICACION,
@@ -347,21 +267,15 @@ public class Servidor {
     }
 
     /**
-     * Envía la lista de usuarios DESCONECTADOS (offline) a todos los clientes.
-     * 
-     * PERSISTENCIA: Ahora consulta la BD (GestorBD.obtenerUsuariosRegistrados)
-     * para obtener todos los usuarios que se han registrado alguna vez,
-     * y calcula la diferencia con los conectados actualmente.
+     * Envía la lista de usuarios desconectados (offline) a todos los clientes.
      */
     public static void enviarListaOffline() {
         List<ManejadorCliente> clientesCopia;
         Mensaje msgOffline;
 
-        // Obtener todos los registrados desde MySQL
         List<String> todosRegistrados = GestorBD.obtenerUsuariosRegistrados();
 
         synchronized (clientesConectados) {
-            // Calcular usuarios offline = registrados - conectados
             List<String> offline = new ArrayList<>();
             for (String registrado : todosRegistrados) {
                 if (!clientesConectados.containsKey(registrado)) {

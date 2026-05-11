@@ -6,31 +6,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * =====================================================================
- * GESTOR DE BASE DE DATOS — Patrón DAO (Data Access Object)
- * =====================================================================
- * 
- * Esta clase aísla toda la lógica de acceso a la base de datos MySQL,
- * manteniendo el código del Servidor y ManejadorCliente limpio y
- * desacoplado de la tecnología de persistencia.
- * 
- * PERSISTENCIA:
- * Reemplaza las variables en RAM (HashSet, HashMap) por consultas a
- * MySQL, permitiendo que los datos sobrevivan reinicios del servidor.
- * 
- * SEGURIDAD:
- * - PreparedStatement para prevenir inyección SQL.
- * - Contraseñas hasheadas con SHA-256 (irreversible).
- * - Contenido de mensajes cifrado con AES-128 (reversible solo con clave).
- * 
- * TABLAS GESTIONADAS:
- * - usuarios: Registro y autenticación (con hash de contraseña).
- * - mensajes_offline: Buzón temporal (se borran al entregar).
- * - historial_mensajes: Registro permanente de TODAS las conversaciones.
- * 
- * LÍMITE DE BUZÓN OFFLINE:
- * Mantiene un límite máximo de 100 mensajes offline por usuario.
- * =====================================================================
+ * Gestor de Base de Datos.
+ * Encapsula la lógica de acceso a la base de datos MySQL (usuarios, mensajes offline, historial).
  */
 public class GestorBD {
 
@@ -64,16 +41,11 @@ public class GestorBD {
         }
     }
 
-    // =====================================================================
-    // MÉTODOS DE AUTENTICACIÓN (con Hash SHA-256)
-    // =====================================================================
-
     /**
      * Registra un nuevo usuario en la base de datos.
-     * La contraseña se almacena como hash SHA-256 (irreversible).
      * 
-     * @param nombre   Nombre de usuario (debe ser único)
-     * @param password Contraseña en texto plano (será hasheada)
+     * @param nombre   
+     * @param password 
      * @return true si el registro fue exitoso, false si el nombre ya existe
      */
     public static boolean registrarUsuario(String nombre, String password) {
@@ -175,11 +147,7 @@ public class GestorBD {
     // =====================================================================
 
     /**
-     * Guarda un mensaje en el buzón offline, cifrando el contenido con AES.
-     * 
-     * ARCHIVOS: Los datos binarios se guardan directamente en la BD
-     * como LONGBLOB en la columna datos_adjuntos. El contenido textual
-     * se cifra con AES antes de almacenarse.
+     * Guarda un mensaje en el buzón offline.
      * 
      * @param msg Objeto Mensaje a guardar
      * @return 0 si se guardó OK, 1 si buzón lleno, 2 si error de BD
@@ -233,12 +201,9 @@ public class GestorBD {
     }
 
     /**
-     * Extrae todos los mensajes offline de un usuario, los descifra y los borra.
-     * Se llama cuando el usuario vuelve a conectarse.
+     * Extrae y borra los mensajes offline de un usuario.
      * 
-     * Los archivos adjuntos se leen directamente desde la BD (LONGBLOB).
-     * 
-     * @param receptor Nombre del usuario que se reconectó
+     * @param receptor Nombre del usuario
      * @return Lista de mensajes pendientes descifrados
      */
     public static List<Mensaje> obtenerYBorrarMensajesOffline(String receptor) {
@@ -309,13 +274,9 @@ public class GestorBD {
     // =====================================================================
 
     /**
-     * Guarda un mensaje en el historial permanente, cifrando el contenido.
-     * Este método se llama SIEMPRE que un mensaje pasa por el servidor
-     * (sea entregado en vivo o guardado en offline).
+     * Guarda un mensaje en el historial permanente.
      * 
-     * Los archivos adjuntos también se guardan en la BD (LONGBLOB).
-     * 
-     * @param msg Objeto Mensaje a guardar en el historial
+     * @param msg Objeto Mensaje a guardar
      */
     public static void guardarMensajeHistorial(Mensaje msg) {
         String sql = "INSERT INTO historial_mensajes (emisor, receptor, tipo, contenido_cifrado, datos_adjuntos, nombre_archivo, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)";
@@ -348,14 +309,10 @@ public class GestorBD {
     }
 
     /**
-     * Obtiene el historial completo de conversaciones de un usuario.
-     * Retorna todos los mensajes donde el usuario sea emisor o receptor,
-     * descifrando el contenido antes de retornarlo.
-     * 
-     * Se llama al iniciar sesión para restaurar las conversaciones pasadas.
+     * Obtiene el historial de conversaciones de un usuario.
      * 
      * @param nombreUsuario Nombre del usuario
-     * @return Lista de mensajes históricos descifrados, ordenados por fecha
+     * @return Lista de mensajes históricos
      */
     public static List<Mensaje> obtenerHistorialUsuario(String nombreUsuario) {
         List<Mensaje> historial = new ArrayList<>();

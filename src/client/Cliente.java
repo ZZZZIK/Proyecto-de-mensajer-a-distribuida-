@@ -10,24 +10,8 @@ import java.io.*;
 import java.net.*;
 
 /**
- * =====================================================================
- * CLIENTE DEL SISTEMA DISTRIBUIDO — Interfaz Swing
- * =====================================================================
- * 
- * TRANSPARENCIA DE ACCESO:
- * El cliente se comunica con el servidor central enviando objetos
- * Mensaje. No necesita conocer la ubicación (IP/puerto) de otros
- * clientes. Solo conoce la dirección del servidor.
- * 
- * TRANSPARENCIA DE UBICACIÓN:
- * Los mensajes se dirigen por NOMBRE de usuario, no por dirección
- * de red. El servidor resuelve la ubicación internamente.
- * 
- * CONCURRENCIA:
- * El cliente utiliza un hilo separado (HiloReceptor) para escuchar
- * mensajes entrantes del servidor de forma continua, mientras el
- * hilo principal de Swing maneja la interfaz gráfica y el envío.
- * =====================================================================
+ * Cliente del sistema de mensajería.
+ * Maneja la interfaz gráfica y la conexión de red con el servidor.
  */
 public class Cliente extends JFrame {
 
@@ -43,11 +27,11 @@ public class Cliente extends JFrame {
     private JTextField campoMensaje;
     private DefaultListModel<String> modeloUsuarios;
     private JList<String> listaUsuarios;
-    private DefaultListModel<String> modeloOffline;   // Lista de usuarios desconectados
-    private JList<String> listaOffline;                // JList para seleccionar usuarios offline
+    private DefaultListModel<String> modeloOffline;   
+    private JList<String> listaOffline;                
     private JButton btnEnviar, btnArchivo, btnDesconectar;
     private JLabel lblEstado;
-    private JTextField campoDestinatario; // Campo para escribir el nombre del destinatario (online u offline)
+    private JTextField campoDestinatario; 
 
     // Colores del tema (inspirado en WhatsApp)
     private static final Color COLOR_FONDO       = new Color(17, 27, 33);
@@ -63,9 +47,6 @@ public class Cliente extends JFrame {
         mostrarDialogoConexion();
     }
 
-    /**
-     * Construye la interfaz gráfica Swing.
-     */
     private void construirInterfaz() {
         setTitle("WhatsApp Distribuido");
         setSize(900, 600);
@@ -75,7 +56,6 @@ public class Cliente extends JFrame {
         getContentPane().setBackground(COLOR_FONDO);
         setLayout(new BorderLayout());
 
-        // ===== HEADER =====
         JPanel panelHeader = new JPanel(new BorderLayout());
         panelHeader.setBackground(COLOR_HEADER);
         panelHeader.setPreferredSize(new Dimension(0, 50));
@@ -268,7 +248,6 @@ public class Cliente extends JFrame {
         panelInput.add(btnEnviar, BorderLayout.EAST);
         add(panelInput, BorderLayout.SOUTH);
 
-        // Manejar cierre de ventana
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
@@ -278,7 +257,6 @@ public class Cliente extends JFrame {
     }
 
     /**
-     * Muestra el diálogo de conexión con autenticación.
      * El usuario puede elegir entre "Iniciar Sesión" o "Registrarse".
      */
     private void mostrarDialogoConexion() {
@@ -399,14 +377,8 @@ public class Cliente extends JFrame {
     }
 
     /**
-     * ===== FUNCIÓN 1: Envío de mensaje de texto =====
-     * 
-     * TRANSPARENCIA DE ACCESO: El usuario selecciona un destinatario
-     * por NOMBRE (no por IP), escribe un texto, y se crea un objeto
-     * Mensaje que se serializa y envía al servidor. El servidor se
-     * encarga de resolver la ubicación del destinatario.
+     * Envía un mensaje de texto al destinatario seleccionado.
      */
-
     
     private void enviarMensajeTexto() {
         if (!conectado) return;
@@ -422,10 +394,9 @@ public class Cliente extends JFrame {
         }
 
         try {
-            // TRANSPARENCIA: Se indica el nombre del destinatario, no su IP
+            // Crear mensaje y enviarlo al servidor
             Mensaje msg = new Mensaje(nombreUsuario, destinatario, Mensaje.TEXTO, texto);
 
-            // MARSHALLING: Serialización del objeto para envío por TCP
             synchronized (salida) {
                 salida.writeObject(msg);
                 salida.flush();
@@ -436,17 +407,12 @@ public class Cliente extends JFrame {
             campoMensaje.setText("");
 
         } catch (IOException e) {
-            // RESILIENCIA: Fallo al enviar
             agregarMensajeSistema("❌ Error al enviar mensaje: " + e.getMessage());
         }
     }
 
     /**
-     * ===== FUNCIÓN 2: Envío de archivo multimedia =====
-     * 
-     * MARSHALLING: El archivo se lee como byte[] y se empaqueta dentro
-     * del objeto Mensaje en el campo datosAdjuntos. Java serializa
-     * automáticamente el array de bytes junto con el resto del objeto.
+     * Permite seleccionar un archivo del disco y enviarlo.
      */
     private void enviarArchivo() {
         if (!conectado) return;
@@ -465,7 +431,7 @@ public class Cliente extends JFrame {
         if (resultado == JFileChooser.APPROVE_OPTION) {
             File archivo = fileChooser.getSelectedFile();
 
-            // Limitar tamaño de archivo (10 MB)
+            // Limitar tamaño de archivo
             if (archivo.length() > 10 * 1024 * 1024) {
                 agregarMensajeSistema("❌ El archivo excede el límite de 10 MB.");
                 return;
@@ -478,7 +444,7 @@ public class Cliente extends JFrame {
                     fis.read(datosArchivo);
                 }
 
-                // MARSHALLING: Crear Mensaje con datos binarios adjuntos
+                // Empaquetar archivo en un mensaje
                 Mensaje msg = new Mensaje(nombreUsuario, destinatario,
                         archivo.getName(), datosArchivo);
 
@@ -493,7 +459,6 @@ public class Cliente extends JFrame {
                         archivo.getName() + " (" + formatearTamano(archivo.length()) + ")");
 
             } catch (IOException e) {
-                // RESILIENCIA: Fallo al leer o enviar archivo
                 agregarMensajeSistema("❌ Error al enviar archivo: " + e.getMessage());
             }
         }
@@ -540,7 +505,7 @@ public class Cliente extends JFrame {
     }
 
     /**
-     * Inserta un botón azul de descarga dentro del área de mensajes.
+     * Inserta un botón de descarga dentro del área de mensajes.
      * El botón permite al usuario elegir dónde guardar el archivo.
      */
     private void agregarBotonDescarga(String emisor, String nombreArchivo, byte[] datos) {
@@ -591,22 +556,15 @@ public class Cliente extends JFrame {
     }
 
     /**
-     * ===== CONCURRENCIA: Hilo receptor de mensajes =====
-     * 
-     * Este hilo interno se ejecuta de forma CONCURRENTE con el hilo
-     * de Swing (interfaz gráfica). Lee mensajes del servidor de forma
-     * continua sin bloquear la UI, permitiendo que el usuario siga
-     * interactuando con la aplicación mientras recibe mensajes.
-     * 
-     * RESILIENCIA: Si ocurre un IOException (desconexión del servidor),
-     * el hilo termina y notifica al usuario, pero no crashea la app.
+     * Hilo encargado de escuchar mensajes entrantes del servidor
+     * de forma continua sin bloquear la interfaz gráfica.
      */
     private class HiloReceptor implements Runnable {
         @Override
         public void run() {
             try {
                 while (conectado) {
-                    // MARSHALLING: Deserialización del objeto recibido
+                    // Deserializar mensaje recibido
                     Mensaje mensaje = (Mensaje) entrada.readObject();
 
                     switch (mensaje.getTipo()) {
@@ -636,7 +594,7 @@ public class Cliente extends JFrame {
                             break;
 
                         case Mensaje.HISTORIAL:
-                            // Mensaje del historial de conversaciones (restauración)
+                            // Mensaje del historial de conversaciones 
                             agregarMensaje("  [📜] " + mensaje.getEmisor() + ": " + mensaje.getContenido());
                             break;
 
@@ -646,7 +604,7 @@ public class Cliente extends JFrame {
                     }
                 }
             } catch (IOException e) {
-                // RESILIENCIA: El servidor se cayó o se perdió la conexión
+                // Pérdida de conexión con el servidor
                 if (conectado) {
                     conectado = false;
                     agregarMensajeSistema("❌ Se perdió la conexión con el servidor.");

@@ -6,35 +6,9 @@ import java.net.*;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
- * =====================================================================
- * MANEJADOR DE CLIENTE — Arquitectura de 2 Hilos + Buzón + Autenticación
- * =====================================================================
- * 
- * CONCURRENCIA — Dos hilos por cliente:
- * Cada cliente conectado tiene DOS hilos independientes:
- * 
- *   1. HILO ENVIADOR (método run()):
- *      - Escucha los mensajes que llegan desde la red del cliente.
- *      - Cuando recibe un mensaje destinado a otro usuario, lo deposita
- *        en el BUZÓN (LinkedBlockingQueue) del destinatario.
- *      - NUNCA toca el ObjectOutputStream de otro cliente directamente.
- * 
- *   2. HILO RECEPTOR (método procesarBuzon()):
- *      - Vigila constantemente su propio Buzón (Queue).
- *      - Cuando cae un mensaje en el buzón, lo saca y lo envía por
- *        la red hacia el cliente usando ObjectOutputStream.
- *      - Si la red del cliente es lenta, SOLO ESTE HILO se bloquea.
- * 
- * AUTENTICACIÓN:
- * El primer mensaje del cliente DEBE ser de tipo LOGIN o REGISTRO.
- * El ManejadorCliente delega la validación a GestorBD (MySQL).
- * Si la autenticación falla, se rechaza la conexión inmediatamente.
- * 
- * PATRÓN MESSAGE QUEUE (BUZÓN):
- * El buzón (LinkedBlockingQueue) actúa como amortiguador entre la
- * velocidad a la que otros usuarios generan mensajes y la velocidad
- * a la que la red de ESTE cliente puede consumirlos.
- * =====================================================================
+ * Manejador de cada conexión de cliente en el servidor.
+ * Utiliza dos hilos por cliente (lectura y escritura) y una cola
+ * para manejar el envío de mensajes sin bloquear al servidor.
  */
 public class ManejadorCliente implements Runnable {
 
@@ -44,10 +18,7 @@ public class ManejadorCliente implements Runnable {
     private String nombreUsuario;
     private volatile boolean activo;
 
-    /**
-     * ===== PATRÓN MESSAGE QUEUE: El Buzón de mensajes =====
-     * Límite de 1000 mensajes para evitar agotar la RAM.
-     */
+    // Cola de mensajes pendientes de enviar al cliente
     private final LinkedBlockingQueue<Mensaje> buzonMensajes = new LinkedBlockingQueue<>(1000);
 
     public ManejadorCliente(Socket socket) {
@@ -56,32 +27,22 @@ public class ManejadorCliente implements Runnable {
     }
 
     /**
-     * ===== HILO ENVIADOR — Método principal del hilo =====
-     * 
-     * Flujo:
-     * 1. Crear streams de objetos (marshalling)
-     * 2. Iniciar el Hilo Receptor (procesarBuzon) en segundo plano
-     * 3. Leer el primer mensaje (LOGIN o REGISTRO) para autenticar
-     * 4. Si la autenticación es exitosa, registrar en memoria
-     * 5. Entrar en bucle escuchando mensajes del cliente
-     * 6. Al finalizar, limpiar recursos
+     * Hilo principal: lee mensajes entrantes del socket y los procesa.
      */
     @Override
     public void run() {
         try {
-            // ===== MARSHALLING: Inicialización de streams =====
+            // Inicializar streams
             salida = new ObjectOutputStream(socket.getOutputStream());
             salida.flush();
             entrada = new ObjectInputStream(socket.getInputStream());
 
-            // ===== CONCURRENCIA: Iniciar Hilo Receptor =====
+            // Iniciar hilo despachador de mensajes
             Thread hiloReceptor = new Thread(this::procesarBuzon);
             hiloReceptor.setDaemon(true);
             hiloReceptor.start();
 
-            // ===== PASO 1: AUTENTICACIÓN =====
-            // El primer mensaje del cliente debe ser LOGIN o REGISTRO.
-            // La contraseña viaja en el campo "contenido" del Mensaje.
+            // Procesar autenticación: el primer mensaje debe ser LOGIN o REGISTRO
             Mensaje primerMensaje = (Mensaje) entrada.readObject();
             String tipo = primerMensaje.getTipo();
             String nombre = primerMensaje.getEmisor();
@@ -133,15 +94,11 @@ public class ManejadorCliente implements Runnable {
                 return;
             }
 
-            // ===== PASO 2: REGISTRAR EN MEMORIA =====
+            // Si se autenticó correctamente, se añade a la lista de conectados
             if (autenticado) {
                 nombreUsuario = nombre;
 
-                // Enviar AUTH_OK PRIMERO, ANTES de registrar en memoria.
-                // registrarClienteEnMemoria() envía listas de usuarios y notificaciones
-                // al buzón. Si AUTH_OK se enviara después, el cliente recibiría una
-                // LISTA_USUARIOS como primer mensaje en vez de AUTH_OK, y no abriría
-                // la ventana del chat.
+                // Enviar confirmación de autenticación
                 Mensaje bienvenida = new Mensaje("SERVIDOR", nombreUsuario,
                         Mensaje.AUTH_OK,
                         "¡Bienvenido al chat, " + nombreUsuario + "! Conexión exitosa.");
@@ -161,7 +118,7 @@ public class ManejadorCliente implements Runnable {
                 System.out.println("[HILO-ENVIADOR-" + nombreUsuario + "] Hilo Enviador iniciado.");
             }
 
-            // ===== PASO 3: Bucle principal de lectura de mensajes =====
+            // Bucle principal de escucha de mensajes
             while (activo) {
                 Mensaje mensaje = (Mensaje) entrada.readObject();
 
@@ -215,7 +172,7 @@ public class ManejadorCliente implements Runnable {
     }
 
     /**
-     * ===== HILO RECEPTOR — Procesa el buzón y envía por la red =====
+     * Hilo despachador: extrae mensajes de la cola y los envía por el socket.
      */
     private void procesarBuzon() {
         System.out.println("[HILO-RECEPTOR-" + nombreUsuario + "] Hilo Receptor iniciado.");

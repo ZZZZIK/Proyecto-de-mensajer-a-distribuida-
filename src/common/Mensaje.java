@@ -5,34 +5,8 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 
 /**
- * =====================================================================
- * CLASE MENSAJE — Objeto Serializable para Marshalling
- * =====================================================================
- * 
- * MARSHALLING / SERIALIZACIÓN:
- * Esta clase implementa la interfaz Serializable, lo que permite que
- * los objetos Mensaje sean convertidos automáticamente a una secuencia
- * de bytes (serialización) al ser enviados a través del socket TCP
- * mediante ObjectOutputStream, y reconstruidos en el extremo receptor
- * (deserialización) mediante ObjectInputStream.
- * 
- * Esto es fundamental en sistemas distribuidos porque permite enviar
- * estructuras de datos complejas (no solo Strings primitivos) entre
- * procesos remotos de forma completamente TRANSPARENTE para el
- * programador.
- * 
- * El campo serialVersionUID garantiza la compatibilidad entre versiones
- * del objeto serializado en distintos procesos/JVMs.
- * 
- * ESTRUCTURA:
- * - emisor:        Nombre del usuario que envía el mensaje
- * - receptor:      Nombre del destinatario (o "TODOS" para broadcast)
- * - tipo:          Tipo de mensaje (TEXTO, ARCHIVO, CONECTAR, etc.)
- * - contenido:     Contenido textual del mensaje
- * - datosAdjuntos: Bytes del archivo adjunto (para tipo ARCHIVO)
- * - nombreArchivo: Nombre original del archivo adjunto
- * - timestamp:     Marca de tiempo de creación del mensaje
- * =====================================================================
+ * Representa un mensaje transferido entre el cliente y el servidor.
+ * Implementa Serializable para poder ser enviado a través de sockets TCP.
  */
 public class Mensaje implements Serializable {
 
@@ -82,9 +56,7 @@ public class Mensaje implements Serializable {
     }
 
     /**
-     * Constructor para mensajes de tipo ARCHIVO.
-     * Los datosAdjuntos (byte[]) son serializados junto con el objeto,
-     * permitiendo el envío de archivos binarios a través del socket TCP.
+     * Constructor para mensajes de tipo ARCHIVO con datos adjuntos.
      * 
      * @param emisor        Nombre del usuario emisor
      * @param receptor      Nombre del usuario receptor
