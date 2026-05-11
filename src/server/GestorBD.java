@@ -19,11 +19,17 @@ import java.util.List;
  * MySQL, permitiendo que los datos sobrevivan reinicios del servidor.
  * 
  * SEGURIDAD:
- * Utiliza PreparedStatement para prevenir inyección SQL.
+ * - PreparedStatement para prevenir inyección SQL.
+ * - Contraseñas hasheadas con SHA-256 (irreversible).
+ * - Contenido de mensajes cifrado con AES-128 (reversible solo con clave).
+ * 
+ * TABLAS GESTIONADAS:
+ * - usuarios: Registro y autenticación (con hash de contraseña).
+ * - mensajes_offline: Buzón temporal (se borran al entregar).
+ * - historial_mensajes: Registro permanente de TODAS las conversaciones.
  * 
  * LÍMITE DE BUZÓN OFFLINE:
- * Mantiene un límite máximo de 100 mensajes offline por usuario
- * (estilo "Buzón de Voz") para prevenir abuso y saturación del disco.
+ * Mantiene un límite máximo de 100 mensajes offline por usuario.
  * =====================================================================
  */
 public class GestorBD {
@@ -38,9 +44,6 @@ public class GestorBD {
 
     /**
      * Establece una conexión con la base de datos MySQL.
-     * 
-     * @return Objeto Connection activo
-     * @throws SQLException Si no se puede conectar
      */
     private static Connection conectar() throws SQLException {
         return DriverManager.getConnection(URL, USUARIO_BD, PASSWORD_BD);
@@ -48,9 +51,6 @@ public class GestorBD {
 
     /**
      * Verifica que la conexión a la base de datos esté operativa.
-     * Se llama al iniciar el servidor para detectar problemas temprano.
-     * 
-     * @return true si la conexión es exitosa
      */
     public static boolean verificarConexion() {
         try (Connection conn = conectar()) {
@@ -65,14 +65,15 @@ public class GestorBD {
     }
 
     // =====================================================================
-    // MÉTODOS DE AUTENTICACIÓN
+    // MÉTODOS DE AUTENTICACIÓN (con Hash SHA-256)
     // =====================================================================
 
     /**
      * Registra un nuevo usuario en la base de datos.
+     * La contraseña se almacena como hash SHA-256 (irreversible).
      * 
      * @param nombre   Nombre de usuario (debe ser único)
-     * @param password Contraseña del usuario
+     * @param password Contraseña en texto plano (será hasheada)
      * @return true si el registro fue exitoso, false si el nombre ya existe
      */
     public static boolean registrarUsuario(String nombre, String password) {
@@ -81,14 +82,14 @@ public class GestorBD {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             stmt.setString(1, nombre);
-            stmt.setString(2, password);
+            stmt.setString(2, Seguridad.hashPassword(password)); // Hash SHA-256
             stmt.executeUpdate();
 
-            System.out.println("[GESTOR-BD] Usuario registrado en BD: " + nombre);
+            System.out.println("[GESTOR-BD] Usuario registrado en BD: " + nombre + " (contraseña hasheada)");
             return true;
 
         } catch (SQLException e) {
-            if (e.getErrorCode() == 1062) { // Duplicate entry (UNIQUE constraint)
+            if (e.getErrorCode() == 1062) { // Duplicate entry
                 System.out.println("[GESTOR-BD] Registro rechazado: '" + nombre + "' ya existe en BD.");
             } else {
                 System.err.println("[GESTOR-BD] Error registrando usuario: " + e.getMessage());
@@ -98,10 +99,11 @@ public class GestorBD {
     }
 
     /**
-     * Autentica un usuario verificando nombre y contraseña.
+     * Autentica un usuario comparando el hash de la contraseña ingresada
+     * con el hash almacenado en la BD.
      * 
      * @param nombre   Nombre de usuario
-     * @param password Contraseña proporcionada
+     * @param password Contraseña en texto plano (será hasheada para comparar)
      * @return true si las credenciales son correctas
      */
     public static boolean autenticarUsuario(String nombre, String password) {
@@ -113,8 +115,9 @@ public class GestorBD {
             ResultSet rs = stmt.executeQuery();
 
             if (rs.next()) {
-                String passAlmacenada = rs.getString("password");
-                boolean valido = passAlmacenada.equals(password);
+                String hashAlmacenado = rs.getString("password");
+                String hashIngresado = Seguridad.hashPassword(password); // Hash SHA-256
+                boolean valido = hashAlmacenado.equals(hashIngresado);
                 System.out.println("[GESTOR-BD] Login de '" + nombre + "': " +
                         (valido ? "ÉXITO" : "CONTRASEÑA INCORRECTA"));
                 return valido;
@@ -130,11 +133,7 @@ public class GestorBD {
     }
 
     /**
-     * Verifica si un usuario existe en la base de datos (se ha registrado alguna vez).
-     * Se usa para validar destinatarios antes de enviar mensajes offline.
-     * 
-     * @param nombre Nombre de usuario a verificar
-     * @return true si el usuario existe en la BD
+     * Verifica si un usuario existe en la base de datos.
      */
     public static boolean usuarioExiste(String nombre) {
         String sql = "SELECT 1 FROM usuarios WHERE nombre_usuario = ?";
@@ -153,9 +152,6 @@ public class GestorBD {
 
     /**
      * Obtiene la lista de TODOS los usuarios registrados en la BD.
-     * Se usa para calcular la lista de usuarios offline (registrados - conectados).
-     * 
-     * @return Lista de nombres de usuario
      */
     public static List<String> obtenerUsuariosRegistrados() {
         List<String> usuarios = new ArrayList<>();
@@ -175,20 +171,16 @@ public class GestorBD {
     }
 
     // =====================================================================
-    // MÉTODOS DE BUZÓN OFFLINE
+    // MÉTODOS DE BUZÓN OFFLINE (con Cifrado AES)
     // =====================================================================
 
     /**
-     * Guarda un mensaje en la bodega offline de un usuario desconectado.
-     * 
-     * LÍMITE DE SEGURIDAD: Si el destinatario ya tiene >= 100 mensajes
-     * acumulados, se rechaza el nuevo mensaje (estilo "Buzón de Voz").
+     * Guarda un mensaje en el buzón offline, cifrando el contenido con AES.
      * 
      * @param msg Objeto Mensaje a guardar
      * @return true si se guardó correctamente, false si el buzón está lleno
      */
     public static boolean guardarMensajeOffline(Mensaje msg) {
-        // Primero verificar el límite
         String sqlCount = "SELECT COUNT(*) AS total FROM mensajes_offline WHERE receptor = ?";
         String sqlInsert = "INSERT INTO mensajes_offline (emisor, receptor, tipo, contenido, datos_adjuntos, nombre_archivo, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)";
 
@@ -205,12 +197,12 @@ public class GestorBD {
                 }
             }
 
-            // Guardar el mensaje
+            // Guardar el mensaje con contenido CIFRADO
             try (PreparedStatement stmtInsert = conn.prepareStatement(sqlInsert)) {
                 stmtInsert.setString(1, msg.getEmisor());
                 stmtInsert.setString(2, msg.getReceptor());
                 stmtInsert.setString(3, msg.getTipo());
-                stmtInsert.setString(4, msg.getContenido());
+                stmtInsert.setString(4, Seguridad.encriptar(msg.getContenido())); // CIFRADO AES
 
                 if (msg.getDatosAdjuntos() != null) {
                     stmtInsert.setBytes(5, msg.getDatosAdjuntos());
@@ -223,8 +215,8 @@ public class GestorBD {
                 stmtInsert.executeUpdate();
             }
 
-            System.out.println("[GESTOR-BD] Mensaje de '" + msg.getEmisor() +
-                    "' guardado en buzón offline de '" + msg.getReceptor() + "'.");
+            System.out.println("[GESTOR-BD] Mensaje offline guardado (cifrado): " +
+                    msg.getEmisor() + " -> " + msg.getReceptor());
             return true;
 
         } catch (SQLException e) {
@@ -234,11 +226,11 @@ public class GestorBD {
     }
 
     /**
-     * Extrae todos los mensajes offline de un usuario y los borra de la BD.
+     * Extrae todos los mensajes offline de un usuario, los descifra y los borra.
      * Se llama cuando el usuario vuelve a conectarse.
      * 
      * @param receptor Nombre del usuario que se reconectó
-     * @return Lista de mensajes pendientes (vacía si no tiene)
+     * @return Lista de mensajes pendientes descifrados
      */
     public static List<Mensaje> obtenerYBorrarMensajesOffline(String receptor) {
         List<Mensaje> mensajes = new ArrayList<>();
@@ -258,7 +250,6 @@ public class GestorBD {
 
                     Mensaje msg;
                     if (datos != null && tipo.equals(Mensaje.ARCHIVO)) {
-                        // Reconstruir mensaje de tipo ARCHIVO
                         msg = new Mensaje(
                                 rs.getString("emisor"),
                                 rs.getString("receptor"),
@@ -266,12 +257,11 @@ public class GestorBD {
                                 datos
                         );
                     } else {
-                        // Reconstruir mensaje de texto o notificación
                         msg = new Mensaje(
                                 rs.getString("emisor"),
                                 rs.getString("receptor"),
                                 tipo,
-                                rs.getString("contenido")
+                                Seguridad.desencriptar(rs.getString("contenido")) // DESCIFRADO AES
                         );
                     }
                     mensajes.add(msg);
@@ -285,12 +275,104 @@ public class GestorBD {
                     stmtDelete.executeUpdate();
                 }
                 System.out.println("[GESTOR-BD] " + mensajes.size() +
-                        " mensajes offline de '" + receptor + "' entregados y borrados de BD.");
+                        " mensajes offline de '" + receptor + "' entregados y borrados.");
             }
 
         } catch (SQLException e) {
             System.err.println("[GESTOR-BD] Error extrayendo mensajes offline: " + e.getMessage());
         }
         return mensajes;
+    }
+
+    // =====================================================================
+    // MÉTODOS DE HISTORIAL PERMANENTE (con Cifrado AES)
+    // =====================================================================
+
+    /**
+     * Guarda un mensaje en el historial permanente, cifrando el contenido.
+     * Este método se llama SIEMPRE que un mensaje pasa por el servidor
+     * (sea entregado en vivo o guardado en offline).
+     * 
+     * @param msg Objeto Mensaje a guardar en el historial
+     */
+    public static void guardarMensajeHistorial(Mensaje msg) {
+        String sql = "INSERT INTO historial_mensajes (emisor, receptor, tipo, contenido_cifrado, nombre_archivo, timestamp) VALUES (?, ?, ?, ?, ?, ?)";
+
+        try (Connection conn = conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, msg.getEmisor());
+            stmt.setString(2, msg.getReceptor());
+            stmt.setString(3, msg.getTipo());
+            stmt.setString(4, Seguridad.encriptar(msg.getContenido())); // CIFRADO AES
+            stmt.setString(5, msg.getNombreArchivo());
+            stmt.setLong(6, msg.getTimestamp());
+            stmt.executeUpdate();
+
+            System.out.println("[GESTOR-BD] Historial guardado (cifrado): " +
+                    msg.getEmisor() + " -> " + msg.getReceptor() + " [" + msg.getTipo() + "]");
+
+        } catch (SQLException e) {
+            System.err.println("[GESTOR-BD] Error guardando historial: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Obtiene el historial completo de conversaciones de un usuario.
+     * Retorna todos los mensajes donde el usuario sea emisor o receptor,
+     * descifrando el contenido antes de retornarlo.
+     * 
+     * Se llama al iniciar sesión para restaurar las conversaciones pasadas.
+     * 
+     * @param nombreUsuario Nombre del usuario
+     * @return Lista de mensajes históricos descifrados, ordenados por fecha
+     */
+    public static List<Mensaje> obtenerHistorialUsuario(String nombreUsuario) {
+        List<Mensaje> historial = new ArrayList<>();
+        String sql = "SELECT emisor, receptor, tipo, contenido_cifrado, nombre_archivo, timestamp " +
+                     "FROM historial_mensajes " +
+                     "WHERE emisor = ? OR receptor = ? " +
+                     "ORDER BY timestamp ASC";
+
+        try (Connection conn = conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, nombreUsuario);
+            stmt.setString(2, nombreUsuario);
+            ResultSet rs = stmt.executeQuery();
+
+            while (rs.next()) {
+                String tipo = rs.getString("tipo");
+                String contenidoDescifrado = Seguridad.desencriptar(rs.getString("contenido_cifrado")); // DESCIFRADO AES
+
+                Mensaje msg;
+                if (tipo.equals(Mensaje.ARCHIVO)) {
+                    // Para archivos del historial, solo mostramos la referencia
+                    msg = new Mensaje(
+                            rs.getString("emisor"),
+                            rs.getString("receptor"),
+                            Mensaje.HISTORIAL,
+                            contenidoDescifrado
+                    );
+                } else {
+                    msg = new Mensaje(
+                            rs.getString("emisor"),
+                            rs.getString("receptor"),
+                            Mensaje.HISTORIAL,
+                            contenidoDescifrado
+                    );
+                }
+                historial.add(msg);
+            }
+
+            if (!historial.isEmpty()) {
+                System.out.println("[GESTOR-BD] Historial de '" + nombreUsuario +
+                        "': " + historial.size() + " mensajes recuperados y descifrados.");
+            }
+
+        } catch (SQLException e) {
+            System.err.println("[GESTOR-BD] Error obteniendo historial: " + e.getMessage());
+        }
+        return historial;
     }
 }

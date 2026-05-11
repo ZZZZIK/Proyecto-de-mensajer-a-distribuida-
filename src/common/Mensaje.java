@@ -54,6 +54,7 @@ public class Mensaje implements Serializable {
     public static final String NOTIFICACION    = "NOTIFICACION";    // Notificaciones del sistema
     public static final String AUTH_OK         = "AUTH_OK";         // Autenticación exitosa
     public static final String AUTH_FAIL       = "AUTH_FAIL";       // Autenticación fallida
+    public static final String HISTORIAL       = "HISTORIAL";       // Servidor envía mensaje del historial
 
     // ===== CAMPOS DEL MENSAJE =====
     private String emisor;          // Quién envía

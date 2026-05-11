@@ -586,6 +586,11 @@ public class Cliente extends JFrame {
                             agregarMensajeSistema(mensaje.getContenido());
                             break;
 
+                        case Mensaje.HISTORIAL:
+                            // Mensaje del historial de conversaciones (restauración)
+                            agregarMensaje("  [📜] " + mensaje.getEmisor() + ": " + mensaje.getContenido());
+                            break;
+
                         default:
                             agregarMensajeSistema("Mensaje desconocido: " + mensaje.getTipo());
                             break;

@@ -158,6 +158,11 @@ public class Servidor {
      * Este método se llama DESPUÉS de que la autenticación (login/registro)
      * fue exitosa en la base de datos.
      * 
+     * ORDEN DE CARGA AL CONECTARSE:
+     * 1. Primero se envía el HISTORIAL completo de conversaciones.
+     * 2. Luego se envían los mensajes del BUZÓN OFFLINE (no leídos).
+     * Esto permite que el usuario vea el contexto pasado y luego los nuevos.
+     * 
      * @param nombre    Nombre de usuario autenticado
      * @param manejador Instancia del ManejadorCliente asociado
      * @return true si se registró correctamente, false si ya está conectado
@@ -173,20 +178,37 @@ public class Servidor {
                     " (Total online: " + clientesConectados.size() + ")");
         }
 
-        // ===== PERSISTENCIA: Entregar mensajes offline desde la BD =====
+        // ===== PASO 1: Enviar HISTORIAL de conversaciones (permanente) =====
+        List<Mensaje> historial = GestorBD.obtenerHistorialUsuario(nombre);
+
+        if (!historial.isEmpty()) {
+            Mensaje avisoHistorial = new Mensaje("SERVIDOR", nombre,
+                    Mensaje.NOTIFICACION,
+                    "📜 Restaurando tu historial de conversaciones (" + historial.size() + " mensajes):");
+            manejador.enviarMensaje(avisoHistorial);
+
+            for (Mensaje msgHistorial : historial) {
+                manejador.enviarMensaje(msgHistorial);
+            }
+            System.out.println("[SERVIDOR] Historial enviado a '" + nombre + "': " + historial.size() + " mensajes.");
+        }
+
+        // ===== PASO 2: Enviar BUZÓN OFFLINE (mensajes no leídos, se borran) =====
         List<Mensaje> mensajesPendientes = GestorBD.obtenerYBorrarMensajesOffline(nombre);
 
         if (!mensajesPendientes.isEmpty()) {
             Mensaje avisoOffline = new Mensaje("SERVIDOR", nombre,
                     Mensaje.NOTIFICACION,
                     "📬 Tienes " + mensajesPendientes.size() +
-                    " mensaje(s) que recibiste mientras estabas desconectado:");
+                    " mensaje(s) nuevo(s) que recibiste mientras estabas desconectado:");
             manejador.enviarMensaje(avisoOffline);
 
             for (Mensaje msgPendiente : mensajesPendientes) {
                 manejador.enviarMensaje(msgPendiente);
+                // Ahora que se entregó, guardarlo en historial permanente
+                GestorBD.guardarMensajeHistorial(msgPendiente);
             }
-            System.out.println("[SERVIDOR] Mensajes offline entregados a '" + nombre + "'.");
+            System.out.println("[SERVIDOR] Mensajes offline entregados a '" + nombre + "' y guardados en historial.");
         }
 
         // Notificar a todos los clientes las listas actualizadas
@@ -212,9 +234,10 @@ public class Servidor {
 
     /**
      * Reenvía un mensaje al destinatario correcto.
-     * Si está conectado, lo deposita en su buzón vivo.
-     * Si está desconectado pero registrado, lo guarda en MySQL.
-     * Si no existe, rechaza con error.
+     * 
+     * Si está conectado → envío en vivo + historial.
+     * Si está desconectado → solo buzón offline (historial se guarda al entregar).
+     * Si no existe → rechaza con error.
      */
     public static void reenviarMensaje(Mensaje mensaje) {
         String receptor = mensaje.getReceptor();
@@ -228,6 +251,9 @@ public class Servidor {
                 destino.enviarMensaje(mensaje);
                 System.out.println("[SERVIDOR] Mensaje reenviado: " + mensaje.getEmisor() +
                         " -> " + receptor + " [" + mensaje.getTipo() + "]");
+
+                // ===== HISTORIAL: Guardar permanentemente (cifrado) =====
+                GestorBD.guardarMensajeHistorial(mensaje);
                 return;
             }
 
@@ -249,7 +275,10 @@ public class Servidor {
             return;
         }
 
-        // ===== PERSISTENCIA: Guardar en buzón offline (MySQL) =====
+        // NOTA: NO guardamos en historial aquí. Se guardará cuando
+        // el usuario se reconecte y se le entregue del buzón.
+
+        // ===== BUZÓN OFFLINE: Guardar temporalmente (cifrado) =====
         boolean guardado = GestorBD.guardarMensajeOffline(mensaje);
 
         if (!guardado) {
@@ -258,7 +287,7 @@ public class Servidor {
                 Mensaje error = new Mensaje("SERVIDOR", mensaje.getEmisor(),
                         Mensaje.NOTIFICACION,
                         "⚠ El buzón offline de '" + receptor +
-                        "' está lleno (Máx 100). Mensaje no entregado.");
+                        "' está lleno (Máx 100). Mensaje guardado en historial pero no en buzón.");
                 emisor.enviarMensaje(error);
             }
             return;
@@ -268,7 +297,7 @@ public class Servidor {
         if (emisor != null) {
             Mensaje aviso = new Mensaje("SERVIDOR", mensaje.getEmisor(),
                     Mensaje.NOTIFICACION,
-                    "📩 '" + receptor + "' está desconectado. Tu mensaje se ha guardado en su buzón offline.");
+                    "📩 '" + receptor + "' está desconectado. Tu mensaje se ha guardado.");
             emisor.enviarMensaje(aviso);
         }
     }

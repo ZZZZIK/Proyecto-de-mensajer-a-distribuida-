@@ -2,9 +2,10 @@
 -- SCRIPT SQL — Base de datos para el Sistema de Mensajería Distribuida
 -- =====================================================================
 -- Ejecutar este script en phpMyAdmin (XAMPP) o en la consola MySQL.
--- Crea la base de datos 'chat_distribuido' con dos tablas:
---   1. usuarios: Registro permanente con autenticación (nombre + contraseña)
---   2. mensajes_offline: Bodega de mensajes para usuarios desconectados
+-- Crea la base de datos 'chat_distribuido' con tres tablas:
+--   1. usuarios: Registro permanente con autenticación (nombre + hash)
+--   2. mensajes_offline: Buzón temporal de mensajes no leídos
+--   3. historial_mensajes: Registro permanente de TODAS las conversaciones
 -- =====================================================================
 
 CREATE DATABASE IF NOT EXISTS chat_distribuido
@@ -14,8 +15,9 @@ CREATE DATABASE IF NOT EXISTS chat_distribuido
 USE chat_distribuido;
 
 -- ===== TABLA DE USUARIOS =====
--- Almacena todos los usuarios registrados con su contraseña.
+-- Almacena todos los usuarios registrados con su contraseña hasheada.
 -- El campo nombre_usuario es UNIQUE para evitar duplicados.
+-- El campo password almacena un hash SHA-256 (64 caracteres hex).
 CREATE TABLE IF NOT EXISTS usuarios (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nombre_usuario VARCHAR(50) NOT NULL UNIQUE,
@@ -23,9 +25,11 @@ CREATE TABLE IF NOT EXISTS usuarios (
     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
--- ===== TABLA DE MENSAJES OFFLINE =====
+-- ===== TABLA DE MENSAJES OFFLINE (BUZÓN TEMPORAL) =====
 -- Almacena los mensajes pendientes para usuarios desconectados.
--- Cuando el usuario se conecta, los mensajes se extraen y se borran.
+-- Cuando el usuario se conecta, los mensajes se extraen y se BORRAN.
+-- Límite: 100 mensajes por usuario (controlado por GestorBD.java).
+-- El contenido se almacena CIFRADO con AES.
 CREATE TABLE IF NOT EXISTS mensajes_offline (
     id INT AUTO_INCREMENT PRIMARY KEY,
     emisor VARCHAR(50) NOT NULL,
@@ -37,4 +41,22 @@ CREATE TABLE IF NOT EXISTS mensajes_offline (
     timestamp BIGINT NOT NULL,
     fecha_guardado TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_receptor (receptor)
+) ENGINE=InnoDB;
+
+-- ===== TABLA DE HISTORIAL DE MENSAJES (PERMANENTE) =====
+-- Almacena TODOS los mensajes que pasan por el servidor de forma permanente.
+-- NO se borran nunca. Se usan para restaurar conversaciones al iniciar sesión.
+-- El contenido se almacena CIFRADO con AES.
+CREATE TABLE IF NOT EXISTS historial_mensajes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    emisor VARCHAR(50) NOT NULL,
+    receptor VARCHAR(50) NOT NULL,
+    tipo VARCHAR(20) NOT NULL,
+    contenido_cifrado TEXT,
+    nombre_archivo VARCHAR(255),
+    timestamp BIGINT NOT NULL,
+    fecha_guardado TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_emisor (emisor),
+    INDEX idx_receptor (receptor),
+    INDEX idx_timestamp (timestamp)
 ) ENGINE=InnoDB;
