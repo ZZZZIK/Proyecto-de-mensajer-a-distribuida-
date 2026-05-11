@@ -279,15 +279,24 @@ public class Servidor {
         // el usuario se reconecte y se le entregue del buzón.
 
         // ===== BUZÓN OFFLINE: Guardar temporalmente (cifrado) =====
-        boolean guardado = GestorBD.guardarMensajeOffline(mensaje);
+        int resultado = GestorBD.guardarMensajeOffline(mensaje);
 
-        if (!guardado) {
+        if (resultado == 1) {
             // Buzón lleno (100 mensajes)
             if (emisor != null) {
                 Mensaje error = new Mensaje("SERVIDOR", mensaje.getEmisor(),
                         Mensaje.NOTIFICACION,
                         "⚠ El buzón offline de '" + receptor +
-                        "' está lleno (Máx 100). Mensaje guardado en historial pero no en buzón.");
+                        "' está lleno (Máx 100). Mensaje no guardado.");
+                emisor.enviarMensaje(error);
+            }
+            return;
+        } else if (resultado == 2) {
+            // Error de almacenamiento
+            if (emisor != null) {
+                Mensaje error = new Mensaje("SERVIDOR", mensaje.getEmisor(),
+                        Mensaje.NOTIFICACION,
+                        "❌ Error al guardar el mensaje offline. Intente de nuevo.");
                 emisor.enviarMensaje(error);
             }
             return;

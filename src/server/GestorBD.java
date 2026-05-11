@@ -177,10 +177,14 @@ public class GestorBD {
     /**
      * Guarda un mensaje en el buzón offline, cifrando el contenido con AES.
      * 
+     * ARCHIVOS: Los datos binarios se guardan en disco (server_files/)
+     * en lugar de como BLOB en MySQL, evitando problemas de tamaño.
+     * Solo la referencia al archivo se guarda en la BD.
+     * 
      * @param msg Objeto Mensaje a guardar
-     * @return true si se guardó correctamente, false si el buzón está lleno
+     * @return 0 si se guardó OK, 1 si buzón lleno, 2 si error de BD
      */
-    public static boolean guardarMensajeOffline(Mensaje msg) {
+    public static int guardarMensajeOffline(Mensaje msg) {
         String sqlCount = "SELECT COUNT(*) AS total FROM mensajes_offline WHERE receptor = ?";
         String sqlInsert = "INSERT INTO mensajes_offline (emisor, receptor, tipo, contenido, datos_adjuntos, nombre_archivo, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)";
 
@@ -193,23 +197,45 @@ public class GestorBD {
                 if (rs.next() && rs.getInt("total") >= MAX_MENSAJES_OFFLINE) {
                     System.out.println("[GESTOR-BD] Buzón offline de '" + msg.getReceptor() +
                             "' lleno (" + MAX_MENSAJES_OFFLINE + "). Mensaje rechazado.");
-                    return false;
+                    return 1; // Buzón lleno
                 }
             }
 
-            // Guardar el mensaje con contenido CIFRADO
+            // Si es ARCHIVO, guardar bytes en disco en vez de BLOB
+            String rutaArchivoDisco = null;
+            if (msg.getTipo().equals(Mensaje.ARCHIVO) && msg.getDatosAdjuntos() != null) {
+                try {
+                    java.io.File dirArchivos = new java.io.File("server_files");
+                    if (!dirArchivos.exists()) dirArchivos.mkdirs();
+
+                    // Nombre único: timestamp + receptor + nombre original
+                    String nombreUnico = msg.getTimestamp() + "_" + msg.getReceptor() + "_" + msg.getNombreArchivo();
+                    java.io.File archivoDisco = new java.io.File(dirArchivos, nombreUnico);
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(archivoDisco)) {
+                        fos.write(msg.getDatosAdjuntos());
+                    }
+                    rutaArchivoDisco = archivoDisco.getAbsolutePath();
+                    System.out.println("[GESTOR-BD] Archivo offline guardado en disco: " + rutaArchivoDisco);
+                } catch (java.io.IOException e) {
+                    System.err.println("[GESTOR-BD] Error guardando archivo en disco: " + e.getMessage());
+                    return 2; // Error de almacenamiento
+                }
+            }
+
+            // Guardar en BD (sin BLOB, con ruta al archivo en disco si aplica)
             try (PreparedStatement stmtInsert = conn.prepareStatement(sqlInsert)) {
                 stmtInsert.setString(1, msg.getEmisor());
                 stmtInsert.setString(2, msg.getReceptor());
                 stmtInsert.setString(3, msg.getTipo());
-                stmtInsert.setString(4, Seguridad.encriptar(msg.getContenido())); // CIFRADO AES
 
-                if (msg.getDatosAdjuntos() != null) {
-                    stmtInsert.setBytes(5, msg.getDatosAdjuntos());
+                if (rutaArchivoDisco != null) {
+                    // Para archivos: guardar la ruta del disco en 'contenido' (cifrada)
+                    stmtInsert.setString(4, Seguridad.encriptar(rutaArchivoDisco));
                 } else {
-                    stmtInsert.setNull(5, Types.BLOB);
+                    stmtInsert.setString(4, Seguridad.encriptar(msg.getContenido()));
                 }
 
+                stmtInsert.setNull(5, Types.BLOB); // Ya NO guardamos BLOB en BD
                 stmtInsert.setString(6, msg.getNombreArchivo());
                 stmtInsert.setLong(7, msg.getTimestamp());
                 stmtInsert.executeUpdate();
@@ -217,11 +243,11 @@ public class GestorBD {
 
             System.out.println("[GESTOR-BD] Mensaje offline guardado (cifrado): " +
                     msg.getEmisor() + " -> " + msg.getReceptor());
-            return true;
+            return 0; // Éxito
 
         } catch (SQLException e) {
             System.err.println("[GESTOR-BD] Error guardando mensaje offline: " + e.getMessage());
-            return false;
+            return 2; // Error de BD
         }
     }
 
@@ -246,22 +272,40 @@ public class GestorBD {
 
                 while (rs.next()) {
                     String tipo = rs.getString("tipo");
-                    byte[] datos = rs.getBytes("datos_adjuntos");
+                    String nombreArchivo = rs.getString("nombre_archivo");
 
                     Mensaje msg;
-                    if (datos != null && tipo.equals(Mensaje.ARCHIVO)) {
-                        msg = new Mensaje(
-                                rs.getString("emisor"),
-                                rs.getString("receptor"),
-                                rs.getString("nombre_archivo"),
-                                datos
-                        );
+                    if (tipo.equals(Mensaje.ARCHIVO) && nombreArchivo != null) {
+                        // ARCHIVO: Leer bytes desde disco (la ruta está cifrada en 'contenido')
+                        String rutaArchivo = Seguridad.desencriptar(rs.getString("contenido"));
+                        java.io.File archivoDisco = new java.io.File(rutaArchivo);
+
+                        if (archivoDisco.exists()) {
+                            try (java.io.FileInputStream fis = new java.io.FileInputStream(archivoDisco)) {
+                                byte[] datos = fis.readAllBytes();
+                                msg = new Mensaje(
+                                        rs.getString("emisor"),
+                                        rs.getString("receptor"),
+                                        nombreArchivo,
+                                        datos
+                                );
+                                // Borrar archivo temporal del disco
+                                archivoDisco.delete();
+                            } catch (java.io.IOException e) {
+                                System.err.println("[GESTOR-BD] Error leyendo archivo offline: " + e.getMessage());
+                                continue; // Saltar este mensaje
+                            }
+                        } else {
+                            System.err.println("[GESTOR-BD] Archivo offline no encontrado: " + rutaArchivo);
+                            continue;
+                        }
                     } else {
+                        // TEXTO u otro tipo: descifrar contenido normalmente
                         msg = new Mensaje(
                                 rs.getString("emisor"),
                                 rs.getString("receptor"),
                                 tipo,
-                                Seguridad.desencriptar(rs.getString("contenido")) // DESCIFRADO AES
+                                Seguridad.desencriptar(rs.getString("contenido"))
                         );
                     }
                     mensajes.add(msg);

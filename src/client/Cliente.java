@@ -3,6 +3,7 @@ package client;
 import common.Mensaje;
 import javax.swing.*;
 import javax.swing.border.*;
+import javax.swing.text.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
@@ -38,7 +39,7 @@ public class Cliente extends JFrame {
     private boolean conectado = false;
 
     // Componentes de la interfaz gráfica
-    private JTextArea areaMensajes;
+    private JTextPane areaMensajes;
     private JTextField campoMensaje;
     private DefaultListModel<String> modeloUsuarios;
     private JList<String> listaUsuarios;
@@ -216,14 +217,12 @@ public class Cliente extends JFrame {
 
         add(panelLateral, BorderLayout.WEST);
 
-        // ===== PANEL CENTRAL: Área de mensajes =====
-        areaMensajes = new JTextArea();
+        // ===== PANEL CENTRAL: Área de mensajes (JTextPane para soportar botones) =====
+        areaMensajes = new JTextPane();
         areaMensajes.setEditable(false);
         areaMensajes.setBackground(COLOR_FONDO);
         areaMensajes.setForeground(COLOR_TEXTO);
         areaMensajes.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        areaMensajes.setLineWrap(true);
-        areaMensajes.setWrapStyleWord(true);
         areaMensajes.setMargin(new Insets(10, 10, 10, 10));
 
         JScrollPane scrollMensajes = new JScrollPane(areaMensajes);
@@ -526,13 +525,63 @@ public class Cliente extends JFrame {
 
     private void agregarMensaje(String texto) {
         SwingUtilities.invokeLater(() -> {
-            areaMensajes.append(texto + "\n");
-            areaMensajes.setCaretPosition(areaMensajes.getDocument().getLength());
+            try {
+                StyledDocument doc = areaMensajes.getStyledDocument();
+                doc.insertString(doc.getLength(), texto + "\n", null);
+                areaMensajes.setCaretPosition(doc.getLength());
+            } catch (BadLocationException e) {
+                e.printStackTrace();
+            }
         });
     }
 
     private void agregarMensajeSistema(String texto) {
         agregarMensaje("  [SISTEMA] " + texto);
+    }
+
+    /**
+     * Inserta un botón azul de descarga dentro del área de mensajes.
+     * El botón permite al usuario elegir dónde guardar el archivo.
+     */
+    private void agregarBotonDescarga(String emisor, String nombreArchivo, byte[] datos) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                StyledDocument doc = areaMensajes.getStyledDocument();
+                doc.insertString(doc.getLength(), emisor + ": \uD83D\uDCCE ", null);
+
+                // Crear botón azul de descarga
+                JButton btnDescargar = new JButton("\u2B07 Descargar: " + nombreArchivo +
+                        " (" + formatearTamano(datos.length) + ")");
+                btnDescargar.setBackground(new Color(30, 120, 220));
+                btnDescargar.setForeground(Color.WHITE);
+                btnDescargar.setFont(new Font("Segoe UI", Font.BOLD, 12));
+                btnDescargar.setFocusPainted(false);
+                btnDescargar.setBorderPainted(false);
+                btnDescargar.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+                btnDescargar.addActionListener(e -> {
+                    JFileChooser chooser = new JFileChooser();
+                    chooser.setSelectedFile(new File(nombreArchivo));
+                    int resultado = chooser.showSaveDialog(this);
+                    if (resultado == JFileChooser.APPROVE_OPTION) {
+                        try (FileOutputStream fos = new FileOutputStream(chooser.getSelectedFile())) {
+                            fos.write(datos);
+                            agregarMensajeSistema("\u2705 Archivo guardado: " + chooser.getSelectedFile().getAbsolutePath());
+                        } catch (IOException ex) {
+                            agregarMensajeSistema("\u274C Error guardando archivo: " + ex.getMessage());
+                        }
+                    }
+                });
+
+                // Insertar el botón como componente en el JTextPane
+                areaMensajes.setCaretPosition(doc.getLength());
+                areaMensajes.insertComponent(btnDescargar);
+                doc.insertString(doc.getLength(), "\n", null);
+                areaMensajes.setCaretPosition(doc.getLength());
+            } catch (BadLocationException e) {
+                e.printStackTrace();
+            }
+        });
     }
 
     private String formatearTamano(long bytes) {
@@ -610,27 +659,13 @@ public class Cliente extends JFrame {
             }
         }
 
-        /**
-         * Guarda un archivo recibido en el directorio "archivos_recibidos".
-         */
         private void recibirArchivo(Mensaje mensaje) {
-            try {
-                File directorio = new File("archivos_recibidos");
-                if (!directorio.exists()) directorio.mkdirs();
-
-                File archivoDestino = new File(directorio, mensaje.getNombreArchivo());
-                try (FileOutputStream fos = new FileOutputStream(archivoDestino)) {
-                    fos.write(mensaje.getDatosAdjuntos());
-                }
-
-                agregarMensaje(mensaje.getEmisor() + ": 📎 Archivo recibido: " +
-                        mensaje.getNombreArchivo() + " (" +
-                        formatearTamano(mensaje.getDatosAdjuntos().length) +
-                        ") → Guardado en: " + archivoDestino.getAbsolutePath());
-
-            } catch (IOException e) {
-                agregarMensajeSistema("❌ Error guardando archivo: " + e.getMessage());
-            }
+            // En vez de descargar automáticamente, mostrar botón azul de descarga
+            agregarBotonDescarga(
+                    mensaje.getEmisor(),
+                    mensaje.getNombreArchivo(),
+                    mensaje.getDatosAdjuntos()
+            );
         }
 
         /**
