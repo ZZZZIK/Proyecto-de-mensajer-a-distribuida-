@@ -177,9 +177,9 @@ public class GestorBD {
     /**
      * Guarda un mensaje en el buzón offline, cifrando el contenido con AES.
      * 
-     * ARCHIVOS: Los datos binarios se guardan en disco (server_files/)
-     * en lugar de como BLOB en MySQL, evitando problemas de tamaño.
-     * Solo la referencia al archivo se guarda en la BD.
+     * ARCHIVOS: Los datos binarios se guardan directamente en la BD
+     * como LONGBLOB en la columna datos_adjuntos. El contenido textual
+     * se cifra con AES antes de almacenarse.
      * 
      * @param msg Objeto Mensaje a guardar
      * @return 0 si se guardó OK, 1 si buzón lleno, 2 si error de BD
@@ -201,41 +201,22 @@ public class GestorBD {
                 }
             }
 
-            // Si es ARCHIVO, guardar bytes en disco en vez de BLOB
-            String rutaArchivoDisco = null;
-            if (msg.getTipo().equals(Mensaje.ARCHIVO) && msg.getDatosAdjuntos() != null) {
-                try {
-                    java.io.File dirArchivos = new java.io.File("server_files");
-                    if (!dirArchivos.exists()) dirArchivos.mkdirs();
-
-                    // Nombre único: timestamp + receptor + nombre original
-                    String nombreUnico = msg.getTimestamp() + "_" + msg.getReceptor() + "_" + msg.getNombreArchivo();
-                    java.io.File archivoDisco = new java.io.File(dirArchivos, nombreUnico);
-                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(archivoDisco)) {
-                        fos.write(msg.getDatosAdjuntos());
-                    }
-                    rutaArchivoDisco = archivoDisco.getAbsolutePath();
-                    System.out.println("[GESTOR-BD] Archivo offline guardado en disco: " + rutaArchivoDisco);
-                } catch (java.io.IOException e) {
-                    System.err.println("[GESTOR-BD] Error guardando archivo en disco: " + e.getMessage());
-                    return 2; // Error de almacenamiento
-                }
-            }
-
-            // Guardar en BD (sin BLOB, con ruta al archivo en disco si aplica)
+            // Guardar en BD (archivos como LONGBLOB directamente en la BD)
             try (PreparedStatement stmtInsert = conn.prepareStatement(sqlInsert)) {
                 stmtInsert.setString(1, msg.getEmisor());
                 stmtInsert.setString(2, msg.getReceptor());
                 stmtInsert.setString(3, msg.getTipo());
+                stmtInsert.setString(4, Seguridad.encriptar(msg.getContenido())); // Contenido cifrado
 
-                if (rutaArchivoDisco != null) {
-                    // Para archivos: guardar la ruta del disco en 'contenido' (cifrada)
-                    stmtInsert.setString(4, Seguridad.encriptar(rutaArchivoDisco));
+                // Guardar datos binarios del archivo directamente en la BD
+                if (msg.getTipo().equals(Mensaje.ARCHIVO) && msg.getDatosAdjuntos() != null) {
+                    stmtInsert.setBytes(5, msg.getDatosAdjuntos());
+                    System.out.println("[GESTOR-BD] Archivo offline guardado en BD: " +
+                            msg.getNombreArchivo() + " (" + msg.getDatosAdjuntos().length + " bytes)");
                 } else {
-                    stmtInsert.setString(4, Seguridad.encriptar(msg.getContenido()));
+                    stmtInsert.setNull(5, Types.BLOB);
                 }
 
-                stmtInsert.setNull(5, Types.BLOB); // Ya NO guardamos BLOB en BD
                 stmtInsert.setString(6, msg.getNombreArchivo());
                 stmtInsert.setLong(7, msg.getTimestamp());
                 stmtInsert.executeUpdate();
@@ -254,6 +235,8 @@ public class GestorBD {
     /**
      * Extrae todos los mensajes offline de un usuario, los descifra y los borra.
      * Se llama cuando el usuario vuelve a conectarse.
+     * 
+     * Los archivos adjuntos se leen directamente desde la BD (LONGBLOB).
      * 
      * @param receptor Nombre del usuario que se reconectó
      * @return Lista de mensajes pendientes descifrados
@@ -276,27 +259,20 @@ public class GestorBD {
 
                     Mensaje msg;
                     if (tipo.equals(Mensaje.ARCHIVO) && nombreArchivo != null) {
-                        // ARCHIVO: Leer bytes desde disco (la ruta está cifrada en 'contenido')
-                        String rutaArchivo = Seguridad.desencriptar(rs.getString("contenido"));
-                        java.io.File archivoDisco = new java.io.File(rutaArchivo);
+                        // ARCHIVO: Leer bytes directamente desde la BD (LONGBLOB)
+                        byte[] datos = rs.getBytes("datos_adjuntos");
 
-                        if (archivoDisco.exists()) {
-                            try (java.io.FileInputStream fis = new java.io.FileInputStream(archivoDisco)) {
-                                byte[] datos = fis.readAllBytes();
-                                msg = new Mensaje(
-                                        rs.getString("emisor"),
-                                        rs.getString("receptor"),
-                                        nombreArchivo,
-                                        datos
-                                );
-                                // Borrar archivo temporal del disco
-                                archivoDisco.delete();
-                            } catch (java.io.IOException e) {
-                                System.err.println("[GESTOR-BD] Error leyendo archivo offline: " + e.getMessage());
-                                continue; // Saltar este mensaje
-                            }
+                        if (datos != null && datos.length > 0) {
+                            msg = new Mensaje(
+                                    rs.getString("emisor"),
+                                    rs.getString("receptor"),
+                                    nombreArchivo,
+                                    datos
+                            );
+                            System.out.println("[GESTOR-BD] Archivo offline recuperado de BD: " +
+                                    nombreArchivo + " (" + datos.length + " bytes)");
                         } else {
-                            System.err.println("[GESTOR-BD] Archivo offline no encontrado: " + rutaArchivo);
+                            System.err.println("[GESTOR-BD] Archivo offline sin datos en BD: " + nombreArchivo);
                             continue;
                         }
                     } else {
@@ -337,10 +313,12 @@ public class GestorBD {
      * Este método se llama SIEMPRE que un mensaje pasa por el servidor
      * (sea entregado en vivo o guardado en offline).
      * 
+     * Los archivos adjuntos también se guardan en la BD (LONGBLOB).
+     * 
      * @param msg Objeto Mensaje a guardar en el historial
      */
     public static void guardarMensajeHistorial(Mensaje msg) {
-        String sql = "INSERT INTO historial_mensajes (emisor, receptor, tipo, contenido_cifrado, nombre_archivo, timestamp) VALUES (?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO historial_mensajes (emisor, receptor, tipo, contenido_cifrado, datos_adjuntos, nombre_archivo, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = conectar();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -349,8 +327,16 @@ public class GestorBD {
             stmt.setString(2, msg.getReceptor());
             stmt.setString(3, msg.getTipo());
             stmt.setString(4, Seguridad.encriptar(msg.getContenido())); // CIFRADO AES
-            stmt.setString(5, msg.getNombreArchivo());
-            stmt.setLong(6, msg.getTimestamp());
+
+            // Guardar datos binarios del archivo en la BD
+            if (msg.getTipo().equals(Mensaje.ARCHIVO) && msg.getDatosAdjuntos() != null) {
+                stmt.setBytes(5, msg.getDatosAdjuntos());
+            } else {
+                stmt.setNull(5, Types.BLOB);
+            }
+
+            stmt.setString(6, msg.getNombreArchivo());
+            stmt.setLong(7, msg.getTimestamp());
             stmt.executeUpdate();
 
             System.out.println("[GESTOR-BD] Historial guardado (cifrado): " +

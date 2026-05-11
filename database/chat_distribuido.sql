@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS historial_mensajes (
     receptor VARCHAR(50) NOT NULL,
     tipo VARCHAR(20) NOT NULL,
     contenido_cifrado TEXT,
+    datos_adjuntos LONGBLOB,
     nombre_archivo VARCHAR(255),
     timestamp BIGINT NOT NULL,
     fecha_guardado TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
