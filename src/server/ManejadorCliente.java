@@ -46,8 +46,9 @@ public class ManejadorCliente implements Runnable {
 
     /**
      * ===== PATRÓN MESSAGE QUEUE: El Buzón de mensajes =====
+     * Límite de 1000 mensajes para evitar agotar la RAM.
      */
-    private final LinkedBlockingQueue<Mensaje> buzonMensajes = new LinkedBlockingQueue<>();
+    private final LinkedBlockingQueue<Mensaje> buzonMensajes = new LinkedBlockingQueue<>(1000);
 
     public ManejadorCliente(Socket socket) {
         this.socket = socket;
@@ -251,7 +252,11 @@ public class ManejadorCliente implements Runnable {
      * Operación instantánea en RAM (nunca se bloquea).
      */
     public void enviarMensaje(Mensaje mensaje) {
-        buzonMensajes.offer(mensaje);
+        boolean aceptado = buzonMensajes.offer(mensaje);
+        if (!aceptado) {
+            System.err.println("[HILO-ENVIADOR-" + (nombreUsuario != null ? nombreUsuario : "NO_AUTENTICADO") + 
+                    "] ADVERTENCIA: Buzón en memoria lleno (límite 1000). Mensaje descartado.");
+        }
     }
 
     /**

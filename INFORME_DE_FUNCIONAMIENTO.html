@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INFORME DE FUNCIONAMIENTO - WhatsApp Distribuido</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 1000px; margin: 0 auto; padding: 30px; background-color: #f0f2f5; }
+        .container { background-color: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #005c4b; text-align: center; border-bottom: 3px solid #005c4b; padding-bottom: 15px; margin-bottom: 30px; }
+        h2 { color: #075e54; margin-top: 40px; border-bottom: 2px solid #e9edef; padding-bottom: 8px; }
+        h3 { color: #128c7e; margin-top: 25px; }
+        p { text-align: justify; margin-bottom: 15px; }
+        ul, ol { margin-bottom: 20px; }
+        li { margin-bottom: 8px; }
+        .highlight { background-color: #e9edef; color: #d32f2f; padding: 2px 6px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 0.95em; font-weight: bold; }
+        .box { border-left: 5px solid #25d366; padding: 15px 20px; margin: 20px 0; background-color: #e9edef; border-radius: 0 8px 8px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { border: 1px solid #d1d7db; padding: 12px; text-align: left; }
+        th { background-color: #075e54; color: white; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>INFORME DE FUNCIONAMIENTO Y ARQUITECTURA<br><small>Sistema de Mensajería Distribuida Java</small></h1>
+
+        <div class="box">
+            <strong>Objetivo de este documento:</strong> Detallar el funcionamiento interno del sistema, el flujo de datos, manejo de concurrencia, persistencia, seguridad, y proveer la base técnica necesaria para el modelado UML y arquitectónico del proyecto.
+        </div>
+
+        <h2>1. Funcionamiento Interno y Flujo de Datos</h2>
+
+        <h3>1.1. Manejo de Concurrencia e Hilos (Threads)</h3>
+        <p>El sistema utiliza un modelo avanzado de concurrencia basado en <strong>"Dos hilos por cliente"</strong> en el servidor, lo cual asegura que las operaciones de red de un usuario nunca afecten a los demás.</p>
+        <ul>
+            <li><strong>Hilo Principal (Servidor):</strong> El bucle principal del <span class="highlight">Servidor.java</span> solo hace una cosa: hacer <span class="highlight">serverSocket.accept()</span>. Cuando un cliente se conecta, delega el socket a un <span class="highlight">ManejadorCliente</span> y crea un hilo nuevo para él.</li>
+            <li><strong>Hilo Enviador (ManejadorCliente - run()):</strong> Lee constantemente el <span class="highlight">ObjectInputStream</span> recibiendo mensajes del cliente. Su trabajo es "enrutar". Cuando recibe un mensaje, busca el buzón del destinatario en RAM y deposita el mensaje ahí de forma instantánea.</li>
+            <li><strong>Hilo Receptor (ManejadorCliente - procesarBuzon()):</strong> Cada cliente tiene un hilo extra en el servidor dedicado EXCLUSIVAMENTE a extraer mensajes de su propio buzón e inyectarlos por la red hacia el cliente a través del <span class="highlight">ObjectOutputStream</span>.</li>
+        </ul>
+
+        <h3>1.2. Uso de Búferes (Colas Sincronizadas) y el Slow Consumer Problem</h3>
+        <p>El núcleo del enrutamiento es la estructura <span class="highlight">LinkedBlockingQueue&lt;Mensaje&gt; buzónMensajes</span>. Esto soluciona el problema de los clientes con <strong>mala conexión (Slow Consumer Problem)</strong>:</p>
+        <p>Si el usuario <em>A</em> tiene mala conexión, su <strong>Hilo Receptor</strong> en el servidor se quedará bloqueado intentando empujar los bytes por el socket. Sin embargo, si el usuario <em>B</em> le envía 100 mensajes, el <strong>Hilo Enviador</strong> de <em>B</em> simplemente dejará esos 100 mensajes en la <span class="highlight">LinkedBlockingQueue</span> de <em>A</em>. Como la cola está en RAM, esta operación toma milisegundos y el hilo de <em>B</em> queda libre para seguir trabajando. <strong>El servidor nunca se congela por culpa de un cliente lento.</strong></p>
+
+        <h3>1.3. Solución a Condiciones de Carrera (Race Conditions)</h3>
+        <p>Las condiciones de carrera se evitan separando estrictamente lo que es memoria RAM de lo que es Base de Datos:</p>
+        <ol>
+            <li><strong>En RAM:</strong> El diccionario <span class="highlight">HashMap&lt;String, ManejadorCliente&gt; clientesConectados</span> es el recurso crítico. Se protege usando un bloque <span class="highlight">synchronized(clientesConectados)</span>. Las operaciones dentro de este bloque son minúsculas (solo <span class="highlight">put</span>, <span class="highlight">get</span>, o <span class="highlight">remove</span>), por lo que el candado se libera casi instantáneamente.</li>
+            <li><strong>En Base de Datos:</strong> Las consultas a MySQL <strong>NUNCA</strong> se hacen dentro del bloque <span class="highlight">synchronized</span>. Si MySQL tarda en guardar un mensaje, esto ocurre fuera del candado, permitiendo que otros hilos sigan ruteando mensajes concurrentemente en la RAM. Además, <span class="highlight">GestorBD</span> abre una nueva <span class="highlight">Connection</span> por cada operación, delegando a MySQL el manejo transaccional.</li>
+        </ol>
+
+        <h3>1.4. Persistencia en Base de Datos (MySQL)</h3>
+        <p>El sistema abandonó el almacenamiento en memoria volátil (Listas) y ahora utiliza el motor InnoDB de MySQL a través de la clase <span class="highlight">GestorBD</span> (Patrón DAO):</p>
+        <ul>
+            <li><strong>usuarios:</strong> Guarda el nombre (UNIQUE) y el hash SHA-256 de la contraseña.</li>
+            <li><strong>historial_mensajes:</strong> Guarda de forma <em>permanente</em> todos los mensajes ruteados en el sistema (contenido cifrado con AES).</li>
+            <li><strong>mensajes_offline:</strong> Funciona como un <em>buzón temporal</em> (límite de 100 mensajes). Si el destinatario no está en el HashMap de conectados, el mensaje se inserta aquí. Al conectarse, el servidor los extrae y hace un <span class="highlight">DELETE</span>.</li>
+            <li><strong>Archivos Offline:</strong> Los archivos binarios evitan el límite <span class="highlight">max_allowed_packet</span> de MySQL guardándose directamente en el disco duro del servidor (<span class="highlight">/server_files</span>). En MySQL solo se guarda la ruta física cifrada. Al entregarse, el archivo se borra del disco.</li>
+        </ul>
+
+        <hr>
+
+        <h2>2. Información para Diagramas (1.2 Modelado de Ingeniería)</h2>
+
+        <h3>Modelo Físico</h3>
+        <ul>
+            <li><strong>Nodos:</strong> Computadoras de Escritorio / Laptops.</li>
+            <li><strong>Entorno de Red:</strong> LAN/WAN. Los clientes requieren conexión TCP/IP hacia la IP del servidor.</li>
+            <li><strong>Representación Gráfica:</strong> Diagrama de despliegue donde múltiples <em>Nodos Cliente</em> (con JRE) se conectan a través de una red (nube) a un <em>Nodo Servidor Central</em>. El Nodo Servidor está conectado localmente a un <em>Nodo Base de Datos</em> (MySQL/XAMPP).</li>
+        </ul>
+
+        <h3>Modelo Arquitectónico</h3>
+        <ul>
+            <li><strong>Tipo de Arquitectura:</strong> Cliente-Servidor Centralizado (Topología en Estrella), Multihilo.</li>
+            <li><strong>Capas:</strong>
+                <ul>
+                    <li><strong>Presentación (Frontend):</strong> Interfaces <span class="highlight">Swing</span> (<span class="highlight">Cliente.java</span>). Muestra datos y captura eventos.</li>
+                    <li><strong>Lógica de Negocio (Backend):</strong> <span class="highlight">Servidor.java</span> y <span class="highlight">ManejadorCliente.java</span>. Controla el ruteo, autenticación y listas de usuarios.</li>
+                    <li><strong>Persistencia de Datos:</strong> <span class="highlight">GestorBD.java</span> (Capa DAO) comunicándose con MySQL vía JDBC.</li>
+                </ul>
+            </li>
+        </ul>
+
+        <h3>Modelado de Funciones (Diagramas de Secuencia UML)</h3>
+        <p><strong>Función 1: Chat de Texto (Destinatario Online)</strong></p>
+        <ol>
+            <li>Cliente Emisor envía <span class="highlight">Mensaje(TEXTO)</span> por Socket.</li>
+            <li><span class="highlight">ManejadorCliente (Enviador)</span> recibe y llama a <span class="highlight">Servidor.reenviarMensaje()</span>.</li>
+            <li>Servidor busca en <span class="highlight">clientesConectados</span>. Encuentra al receptor.</li>
+            <li>Servidor inserta el mensaje en la <span class="highlight">LinkedBlockingQueue</span> del receptor y llama a <span class="highlight">GestorBD.guardarMensajeHistorial()</span>.</li>
+            <li><span class="highlight">ManejadorCliente (Receptor)</span> del destinatario saca el mensaje de la cola y lo envía por Socket.</li>
+            <li>Cliente Receptor lo muestra en la UI.</li>
+        </ol>
+        <p><strong>Función 2: Transferencia de Archivo (Destinatario Offline)</strong></p>
+        <ol>
+            <li>Cliente Emisor adjunta archivo y envía <span class="highlight">Mensaje(ARCHIVO)</span> por Socket.</li>
+            <li>Servidor no encuentra al destinatario en <span class="highlight">clientesConectados</span>.</li>
+            <li>Servidor verifica en <span class="highlight">GestorBD</span> si el usuario existe. Sí existe.</li>
+            <li>Servidor llama a <span class="highlight">GestorBD.guardarMensajeOffline()</span>.</li>
+            <li>GestorBD extrae los bytes, los guarda en <span class="highlight">/server_files/</span> en el disco local, y guarda la ruta en MySQL (tabla mensajes_offline).</li>
+            <li>Servidor notifica al Cliente Emisor que se guardó en buzón.</li>
+        </ol>
+
+        <hr>
+
+        <h2>3. Información para Análisis (1.3 Análisis Fundamental)</h2>
+
+        <h3>Modelo de Seguridad</h3>
+        <ul>
+            <li><strong>Canal Inseguro:</strong> La conexión TCP pura a través de Internet (WAN) es susceptible a ataques <em>Man-in-the-Middle (MitM)</em>. Actualmente, los objetos viajan serializados pero no encriptados en tránsito (propuesta de mitigación: usar SSL/TLS con <span class="highlight">SSLSocket</span>).</li>
+            <li><strong>Seguridad en Reposo (Mitigación implementada):</strong> Para evitar fugas de información desde el lado del servidor, se ha implementado la clase <span class="highlight">Seguridad.java</span>.
+                <ul>
+                    <li><em>Contraseñas:</em> No se guardan en texto plano. Se procesan por la función hash criptográfica <strong>SHA-256</strong> (irreversible). Si la BD es comprometida, las credenciales no son reveladas.</li>
+                    <li><em>Mensajes:</em> El contenido de los mensajes de chat y las rutas de los archivos se cifran usando <strong>AES-128 (Cifrado Simétrico)</strong> antes de entrar a las tablas <span class="highlight">historial_mensajes</span> y <span class="highlight">mensajes_offline</span>. El administrador de la base de datos no puede leer las conversaciones.</li>
+                </ul>
+            </li>
+        </ul>
+
+        <h3>Modelo de Fallos</h3>
+        <ul>
+            <li><strong>Fallo por Crash (Caída de cliente):</strong> Si un proceso Cliente se cierra inesperadamente o pierde internet (EOFException / SocketException), el Hilo Enviador del servidor lo detecta, rompe el bucle, cierra los streams, y ejecuta el bloque <span class="highlight">finally</span> donde llama a <span class="highlight">Servidor.removerCliente()</span>, lo cual actualiza el estado del sistema limpiamente.</li>
+            <li><strong>Fallo por Crash (Caída del servidor):</strong> Si el servidor cae, los clientes lo detectan en su <span class="highlight">HiloReceptor</span> y la interfaz muestra "Desconectado". Los datos no se pierden, ya que las estructuras volátiles (HashMap) solo mantienen el estado de <em>presencia</em>. Toda la información dura está respaldada en InnoDB (transaccional).</li>
+            <li><strong>Fallo por Omisión (Pérdida de paquetes red):</strong> Delegado a la capa TCP del sistema operativo, que garantiza entrega en orden, suma de verificación y retransmisión automática.</li>
+            <li><strong>Fallo de Base de Datos:</strong> Si MySQL se apaga en tiempo de ejecución, el sistema captura la <span class="highlight">SQLException</span> en la capa DAO. El sistema está diseñado para enviar una notificación visual al usuario (Ej: "Error al guardar el mensaje offline") permitiendo que el servidor principal continúe operando sin colapsar (Fail-safe parcial).</li>
+        </ul>
+
+    </div>
+</body>
+</html>
