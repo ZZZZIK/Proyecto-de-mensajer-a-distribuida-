@@ -42,8 +42,11 @@ public class Cliente extends JFrame {
     private JTextField campoMensaje;
     private DefaultListModel<String> modeloUsuarios;
     private JList<String> listaUsuarios;
+    private DefaultListModel<String> modeloOffline;   // Lista de usuarios desconectados
+    private JList<String> listaOffline;                // JList para seleccionar usuarios offline
     private JButton btnEnviar, btnArchivo, btnDesconectar;
     private JLabel lblEstado;
+    private JTextField campoDestinatario; // Campo para escribir el nombre del destinatario (online u offline)
 
     // Colores del tema (inspirado en WhatsApp)
     private static final Color COLOR_FONDO       = new Color(17, 27, 33);
@@ -104,17 +107,25 @@ public class Cliente extends JFrame {
 
         add(panelHeader, BorderLayout.NORTH);
 
-        // ===== PANEL LATERAL: Lista de usuarios =====
+        // ===== PANEL LATERAL: Listas de usuarios =====
         JPanel panelLateral = new JPanel(new BorderLayout());
         panelLateral.setBackground(COLOR_PANEL);
-        panelLateral.setPreferredSize(new Dimension(200, 0));
+        panelLateral.setPreferredSize(new Dimension(220, 0));
         panelLateral.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, COLOR_BORDE));
 
-        JLabel lblUsuarios = new JLabel("  Usuarios en línea");
+        // Panel contenedor para ambas listas (online y offline)
+        JPanel panelListas = new JPanel();
+        panelListas.setLayout(new BoxLayout(panelListas, BoxLayout.Y_AXIS));
+        panelListas.setBackground(COLOR_PANEL);
+
+        // --- LISTA DE USUARIOS EN LÍNEA ---
+        JLabel lblUsuarios = new JLabel("  ✅ Usuarios en línea");
         lblUsuarios.setFont(new Font("Segoe UI", Font.BOLD, 13));
         lblUsuarios.setForeground(COLOR_VERDE);
-        lblUsuarios.setPreferredSize(new Dimension(0, 35));
-        panelLateral.add(lblUsuarios, BorderLayout.NORTH);
+        lblUsuarios.setPreferredSize(new Dimension(220, 30));
+        lblUsuarios.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        lblUsuarios.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panelListas.add(lblUsuarios);
 
         modeloUsuarios = new DefaultListModel<>();
         listaUsuarios = new JList<>(modeloUsuarios);
@@ -123,12 +134,85 @@ public class Cliente extends JFrame {
         listaUsuarios.setSelectionBackground(COLOR_INPUT);
         listaUsuarios.setSelectionForeground(COLOR_VERDE);
         listaUsuarios.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        listaUsuarios.setFixedCellHeight(40);
+        listaUsuarios.setFixedCellHeight(35);
 
         JScrollPane scrollUsuarios = new JScrollPane(listaUsuarios);
         scrollUsuarios.setBorder(null);
         scrollUsuarios.getViewport().setBackground(COLOR_PANEL);
-        panelLateral.add(scrollUsuarios, BorderLayout.CENTER);
+        scrollUsuarios.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panelListas.add(scrollUsuarios);
+
+        // --- LISTA DE USUARIOS DESCONECTADOS ---
+        JLabel lblOffline = new JLabel("  ⚪ Usuarios desconectados");
+        lblOffline.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        lblOffline.setForeground(new Color(150, 150, 150));
+        lblOffline.setPreferredSize(new Dimension(220, 30));
+        lblOffline.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        lblOffline.setAlignmentX(Component.LEFT_ALIGNMENT);
+        lblOffline.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDE));
+        panelListas.add(lblOffline);
+
+        modeloOffline = new DefaultListModel<>();
+        listaOffline = new JList<>(modeloOffline);
+        listaOffline.setBackground(COLOR_PANEL);
+        listaOffline.setForeground(new Color(150, 150, 150));
+        listaOffline.setSelectionBackground(COLOR_INPUT);
+        listaOffline.setSelectionForeground(new Color(200, 200, 200));
+        listaOffline.setFont(new Font("Segoe UI", Font.ITALIC, 14));
+        listaOffline.setFixedCellHeight(35);
+
+        JScrollPane scrollOffline = new JScrollPane(listaOffline);
+        scrollOffline.setBorder(null);
+        scrollOffline.getViewport().setBackground(COLOR_PANEL);
+        scrollOffline.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panelListas.add(scrollOffline);
+
+        panelLateral.add(panelListas, BorderLayout.CENTER);
+
+        // ===== CAMPO DESTINATARIO =====
+        JPanel panelDestinatario = new JPanel(new BorderLayout(5, 5));
+        panelDestinatario.setBackground(COLOR_PANEL);
+        panelDestinatario.setBorder(BorderFactory.createEmptyBorder(5, 5, 8, 5));
+
+        JLabel lblDestinatario = new JLabel("Para:");
+        lblDestinatario.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        lblDestinatario.setForeground(COLOR_VERDE);
+        panelDestinatario.add(lblDestinatario, BorderLayout.NORTH);
+
+        campoDestinatario = new JTextField();
+        campoDestinatario.setBackground(COLOR_INPUT);
+        campoDestinatario.setForeground(COLOR_TEXTO);
+        campoDestinatario.setCaretColor(COLOR_TEXTO);
+        campoDestinatario.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        campoDestinatario.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(COLOR_BORDE),
+                BorderFactory.createEmptyBorder(4, 8, 4, 8)));
+        campoDestinatario.setToolTipText("Seleccione un usuario de la lista o escriba su nombre");
+        panelDestinatario.add(campoDestinatario, BorderLayout.CENTER);
+
+        panelLateral.add(panelDestinatario, BorderLayout.SOUTH);
+
+        // Al seleccionar un usuario ONLINE, rellenar el campo y deseleccionar la otra lista
+        listaUsuarios.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                String seleccionado = listaUsuarios.getSelectedValue();
+                if (seleccionado != null) {
+                    campoDestinatario.setText(seleccionado);
+                    listaOffline.clearSelection();
+                }
+            }
+        });
+
+        // Al seleccionar un usuario OFFLINE, rellenar el campo y deseleccionar la otra lista
+        listaOffline.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                String seleccionado = listaOffline.getSelectedValue();
+                if (seleccionado != null) {
+                    campoDestinatario.setText(seleccionado);
+                    listaUsuarios.clearSelection();
+                }
+            }
+        });
 
         add(panelLateral, BorderLayout.WEST);
 
@@ -299,9 +383,10 @@ public class Cliente extends JFrame {
         String texto = campoMensaje.getText().trim();
         if (texto.isEmpty()) return;
 
-        String destinatario = listaUsuarios.getSelectedValue();
-        if (destinatario == null) {
-            agregarMensajeSistema("⚠ Seleccione un usuario de la lista para enviar el mensaje.");
+        // Leer destinatario del campo de texto (puede ser online u offline)
+        String destinatario = campoDestinatario.getText().trim();
+        if (destinatario.isEmpty()) {
+            agregarMensajeSistema("⚠ Escriba el nombre del destinatario en el campo 'Para:' o seleccione uno de la lista.");
             return;
         }
 
@@ -335,9 +420,10 @@ public class Cliente extends JFrame {
     private void enviarArchivo() {
         if (!conectado) return;
 
-        String destinatario = listaUsuarios.getSelectedValue();
-        if (destinatario == null) {
-            agregarMensajeSistema("⚠ Seleccione un usuario de la lista antes de enviar un archivo.");
+        // Leer destinatario del campo de texto (puede ser online u offline)
+        String destinatario = campoDestinatario.getText().trim();
+        if (destinatario.isEmpty()) {
+            agregarMensajeSistema("⚠ Escriba el nombre del destinatario en el campo 'Para:' o seleccione uno de la lista.");
             return;
         }
 
@@ -454,8 +540,13 @@ public class Cliente extends JFrame {
                             break;
 
                         case Mensaje.LISTA_USUARIOS:
-                            // Actualizar lista de usuarios en la interfaz
+                            // Actualizar lista de usuarios conectados
                             actualizarListaUsuarios(mensaje.getContenido());
+                            break;
+
+                        case Mensaje.LISTA_OFFLINE:
+                            // Actualizar lista de usuarios desconectados
+                            actualizarListaOffline(mensaje.getContenido());
                             break;
 
                         case Mensaje.NOTIFICACION:
@@ -519,9 +610,28 @@ public class Cliente extends JFrame {
                         }
                     }
                 }
-                // Restaurar selección si el usuario aún existe
                 if (seleccionado != null && modeloUsuarios.contains(seleccionado)) {
                     listaUsuarios.setSelectedValue(seleccionado, true);
+                }
+            });
+        }
+
+        /**
+         * Actualiza la lista visual de usuarios desconectados (offline).
+         */
+        private void actualizarListaOffline(String listaCSV) {
+            SwingUtilities.invokeLater(() -> {
+                String seleccionado = listaOffline.getSelectedValue();
+                modeloOffline.clear();
+                if (listaCSV != null && !listaCSV.isEmpty()) {
+                    for (String usuario : listaCSV.split(",")) {
+                        if (!usuario.equals(nombreUsuario)) {
+                            modeloOffline.addElement(usuario);
+                        }
+                    }
+                }
+                if (seleccionado != null && modeloOffline.contains(seleccionado)) {
+                    listaOffline.setSelectedValue(seleccionado, true);
                 }
             });
         }

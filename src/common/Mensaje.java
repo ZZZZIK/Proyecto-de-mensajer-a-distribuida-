@@ -47,7 +47,8 @@ public class Mensaje implements Serializable {
     // Tipos de control del sistema (señalización interna):
     public static final String CONECTAR        = "CONECTAR";        // Cliente solicita conexión
     public static final String DESCONECTAR     = "DESCONECTAR";     // Cliente notifica desconexión
-    public static final String LISTA_USUARIOS  = "LISTA_USUARIOS";  // Servidor envía lista actualizada
+    public static final String LISTA_USUARIOS  = "LISTA_USUARIOS";  // Servidor envía lista de conectados
+    public static final String LISTA_OFFLINE   = "LISTA_OFFLINE";   // Servidor envía lista de desconectados
     public static final String NOTIFICACION    = "NOTIFICACION";    // Notificaciones del sistema
 
     // ===== CAMPOS DEL MENSAJE =====
