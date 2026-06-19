@@ -22,6 +22,12 @@ public class Cliente extends JFrame {
     private String nombreUsuario;
     private boolean conectado = false;
 
+    // Reconexión automática a otro nodo (Entrega 2 — Tolerancia a fallos)
+    private String passwordGuardado;
+    private String ipActual;
+    private int puertoActual;
+    private final int[] puertosNodos = {5001, 5002, 5003};
+
     // Componentes de la interfaz gráfica
     private JTextPane areaMensajes;
     private JTextField campoMensaje;
@@ -264,7 +270,7 @@ public class Cliente extends JFrame {
         JTextField campoNombre = new JTextField("Usuario1");
         JPasswordField campoPassword = new JPasswordField();
         JTextField campoIP = new JTextField("localhost");
-        JTextField campoPuerto = new JTextField("5000");
+        JTextField campoPuerto = new JTextField("5001");
 
         panel.add(new JLabel("Nombre de usuario:"));
         panel.add(campoNombre);
@@ -330,6 +336,9 @@ public class Cliente extends JFrame {
             entrada = new ObjectInputStream(socket.getInputStream());
 
             nombreUsuario = nombre;
+            passwordGuardado = password;
+            ipActual = ip;
+            puertoActual = puerto;
 
             // Enviar credenciales al servidor (la contraseña viaja en 'contenido')
             Mensaje msgAuth = new Mensaje(nombreUsuario, "SERVIDOR",
@@ -486,6 +495,81 @@ public class Cliente extends JFrame {
         System.exit(0);
     }
 
+    /**
+     * Intenta reconectarse automáticamente a otro nodo disponible.
+     * Recorre todos los nodos conocidos (puertos 5001, 5002, 5003)
+     * excluyendo el nodo actual que falló. Realiza hasta 3 rondas de intentos.
+     */
+    private void intentarReconexion() {
+        new Thread(() -> {
+            agregarMensajeSistema("\uD83D\uDD04 Intentando reconexión automática a otro nodo...");
+
+            for (int intento = 0; intento < 3; intento++) {
+                for (int puerto : puertosNodos) {
+                    if (puerto == puertoActual) continue;
+
+                    try {
+                        agregarMensajeSistema("\uD83D\uDD04 Intentando Nodo en puerto " + puerto + "...");
+                        Socket nuevoSocket = new Socket();
+                        nuevoSocket.connect(new InetSocketAddress(ipActual, puerto), 3000);
+
+                        ObjectOutputStream nuevaSalida = new ObjectOutputStream(nuevoSocket.getOutputStream());
+                        nuevaSalida.flush();
+                        ObjectInputStream nuevaEntrada = new ObjectInputStream(nuevoSocket.getInputStream());
+
+                        Mensaje msgLogin = new Mensaje(nombreUsuario, "SERVIDOR",
+                                Mensaje.LOGIN, passwordGuardado);
+                        nuevaSalida.writeObject(msgLogin);
+                        nuevaSalida.flush();
+
+                        Mensaje respuesta = (Mensaje) nuevaEntrada.readObject();
+
+                        if (respuesta.getTipo().equals(Mensaje.AUTH_OK)) {
+                            socket = nuevoSocket;
+                            salida = nuevaSalida;
+                            entrada = nuevaEntrada;
+                            conectado = true;
+                            puertoActual = puerto;
+
+                            agregarMensajeSistema("\u2705 ¡Reconexión exitosa al Nodo en puerto " + puerto + "!");
+                            agregarMensajeSistema(respuesta.getContenido());
+
+                            final int pFinal = puerto;
+                            SwingUtilities.invokeLater(() -> {
+                                lblEstado.setText("Reconectado: " + nombreUsuario + " [Puerto " + pFinal + "]");
+                                setTitle("WhatsApp Distribuido — " + nombreUsuario + " [Nodo:" + pFinal + "]");
+                            });
+
+                            Thread hiloReceptor = new Thread(new HiloReceptor());
+                            hiloReceptor.setDaemon(true);
+                            hiloReceptor.start();
+                            return;
+                        } else {
+                            nuevoSocket.close();
+                        }
+
+                    } catch (Exception e) {
+                        agregarMensajeSistema("   \u2717 Nodo en puerto " + puerto + " no disponible.");
+                    }
+                }
+
+                if (intento < 2) {
+                    try {
+                        agregarMensajeSistema("\uD83D\uDD04 Reintentando en 3 segundos... (intento " + (intento + 2) + "/3)");
+                        Thread.sleep(3000);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                }
+            }
+
+            agregarMensajeSistema("\u274C No se pudo reconectar a ningún nodo después de 3 intentos.");
+            SwingUtilities.invokeLater(() ->
+                lblEstado.setText("Desconectado (sin nodos disponibles)")
+            );
+        }, "Reconexion-Automatica").start();
+    }
+
     // ===== Métodos auxiliares de UI =====
 
     private void agregarMensaje(String texto) {
@@ -590,6 +674,9 @@ public class Cliente extends JFrame {
 
                         case Mensaje.NOTIFICACION:
                             // Notificación del sistema
+                            if (mensaje.getContenido() != null && mensaje.getContenido().contains("[METRICAS_COORD]")) {
+                                break;
+                            }
                             agregarMensajeSistema(mensaje.getContenido());
                             break;
 
@@ -604,13 +691,15 @@ public class Cliente extends JFrame {
                     }
                 }
             } catch (IOException e) {
-                // Pérdida de conexión con el servidor
+                // Pérdida de conexión con el nodo actual
                 if (conectado) {
                     conectado = false;
-                    agregarMensajeSistema("❌ Se perdió la conexión con el servidor.");
+                    agregarMensajeSistema("❌ Se perdió la conexión con el nodo actual (puerto " + puertoActual + ").");
                     SwingUtilities.invokeLater(() ->
-                        lblEstado.setText("Desconectado (error de red)")
+                        lblEstado.setText("Reconectando a otro nodo...")
                     );
+                    // Intentar reconexión automática a otro nodo
+                    intentarReconexion();
                 }
             } catch (ClassNotFoundException e) {
                 agregarMensajeSistema("❌ Error de deserialización: " + e.getMessage());

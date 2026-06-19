@@ -1,0 +1,11 @@
+[2026-06-18 23:56:42.578] [NODO-0] [V=[-]] [SISTEMA] === LOG INICIADO — Nodo 0 — 2026-06-18 23:56:42.576 ===
+[2026-06-18 23:56:42.589] [NODO-0] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-18 23:56:42.590] [NODO-0] [V=[-]] [SISTEMA]   NODO-0 — WhatsApp Distribuido Multinodo
+[2026-06-18 23:56:42.591] [NODO-0] [V=[-]] [SISTEMA]   Puerto clientes: 5001
+[2026-06-18 23:56:42.591] [NODO-0] [V=[-]] [SISTEMA]   Puerto inter-nodo: 5101
+[2026-06-18 23:56:42.591] [NODO-0] [V=[-]] [SISTEMA]   Peers configurados: 2
+[2026-06-18 23:56:42.592] [NODO-0] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-18 23:56:42.822] [NODO-0] [V=[-]] [FALLO] No se pudo conectar a MySQL. Abortando.
+[2026-06-18 23:56:42.822] [NODO-0] [V=[-]] [SISTEMA] Cerrando nodo...
+[2026-06-18 23:56:42.823] [NODO-0] [V=[-]] [HEARTBEAT] Gestor de Heartbeats detenido
+[2026-06-18 23:56:42.823] [NODO-0] [V=[-]] [SISTEMA] === LOG CERRADO — Nodo 0 ===

@@ -1,6 +1,7 @@
 package server;
 
 import common.Mensaje;
+import node.NodoServidor;
 import java.io.*;
 import java.net.*;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -9,6 +10,10 @@ import java.util.concurrent.LinkedBlockingQueue;
  * Manejador de cada conexión de cliente en el servidor.
  * Utiliza dos hilos por cliente (lectura y escritura) y una cola
  * para manejar el envío de mensajes sin bloquear al servidor.
+ * 
+ * Soporta dos modos de operación:
+ * 1. Modo standalone: con Servidor centralizado (compatibilidad hacia atrás)
+ * 2. Modo distribuido: con NodoServidor (Entrega 2)
  */
 public class ManejadorCliente implements Runnable {
 
@@ -18,12 +23,28 @@ public class ManejadorCliente implements Runnable {
     private String nombreUsuario;
     private volatile boolean activo;
 
+    // Referencia al NodoServidor (modo distribuido, null en modo standalone)
+    private NodoServidor nodoServidor;
+
     // Cola de mensajes pendientes de enviar al cliente
     private final LinkedBlockingQueue<Mensaje> buzonMensajes = new LinkedBlockingQueue<>(1000);
 
+    /**
+     * Constructor modo standalone (compatibilidad con Servidor original).
+     */
     public ManejadorCliente(Socket socket) {
         this.socket = socket;
         this.activo = true;
+        this.nodoServidor = null;
+    }
+
+    /**
+     * Constructor modo distribuido (con NodoServidor).
+     */
+    public ManejadorCliente(Socket socket, NodoServidor nodoServidor) {
+        this.socket = socket;
+        this.activo = true;
+        this.nodoServidor = nodoServidor;
     }
 
     /**
@@ -55,14 +76,14 @@ public class ManejadorCliente implements Runnable {
                 boolean registrado = GestorBD.registrarUsuario(nombre, password);
                 if (registrado) {
                     autenticado = true;
-                    System.out.println("[HILO-ENVIADOR-" + nombre + "] Cuenta creada exitosamente.");
+                    logServidor(nombre, "Cuenta creada exitosamente.");
                 } else {
                     // Nombre ya existe en la BD
                     Mensaje error = new Mensaje("SERVIDOR", nombre,
                             Mensaje.AUTH_FAIL,
                             "El nombre de usuario '" + nombre + "' ya está registrado. Intente con otro.");
                     enviarMensaje(error);
-                    Thread.sleep(500); // Dar tiempo al hilo receptor para enviar
+                    Thread.sleep(500);
                     socket.close();
                     return;
                 }
@@ -72,7 +93,7 @@ public class ManejadorCliente implements Runnable {
                 boolean credencialesOk = GestorBD.autenticarUsuario(nombre, password);
                 if (credencialesOk) {
                     autenticado = true;
-                    System.out.println("[HILO-ENVIADOR-" + nombre + "] Login exitoso.");
+                    logServidor(nombre, "Login exitoso.");
                 } else {
                     Mensaje error = new Mensaje("SERVIDOR", nombre,
                             Mensaje.AUTH_FAIL,
@@ -98,13 +119,29 @@ public class ManejadorCliente implements Runnable {
             if (autenticado) {
                 nombreUsuario = nombre;
 
+                // Indicar en qué nodo está conectado
+                String infoNodo = "";
+                if (nodoServidor != null) {
+                    infoNodo = " [Nodo-" + nodoServidor.getNodoId() + "]";
+                }
+
                 // Enviar confirmación de autenticación
                 Mensaje bienvenida = new Mensaje("SERVIDOR", nombreUsuario,
                         Mensaje.AUTH_OK,
-                        "¡Bienvenido al chat, " + nombreUsuario + "! Conexión exitosa.");
+                        "¡Bienvenido al chat, " + nombreUsuario + "!" + infoNodo +
+                        " Conexión exitosa.");
                 enviarMensaje(bienvenida);
 
-                boolean enMemoria = Servidor.registrarClienteEnMemoria(nombreUsuario, this);
+                // Registrar en el sistema correspondiente
+                boolean enMemoria;
+                if (nodoServidor != null) {
+                    // Modo distribuido
+                    enMemoria = nodoServidor.registrarClienteLocal(nombreUsuario, this);
+                } else {
+                    // Modo standalone
+                    enMemoria = Servidor.registrarClienteEnMemoria(nombreUsuario, this);
+                }
+
                 if (!enMemoria) {
                     Mensaje error = new Mensaje("SERVIDOR", nombreUsuario,
                             Mensaje.AUTH_FAIL,
@@ -115,59 +152,122 @@ public class ManejadorCliente implements Runnable {
                     return;
                 }
 
-                System.out.println("[HILO-ENVIADOR-" + nombreUsuario + "] Hilo Enviador iniciado.");
+                // Enviar historial al usuario
+                enviarHistorial(nombreUsuario);
+
+                logServidor(nombreUsuario, "Hilo Enviador iniciado.");
             }
 
             // Bucle principal de escucha de mensajes
             while (activo) {
                 Mensaje mensaje = (Mensaje) entrada.readObject();
 
-                System.out.println("[HILO-ENVIADOR-" + nombreUsuario + "] Recibido: " + mensaje);
+                logServidor(nombreUsuario, "Recibido: " + mensaje);
 
                 switch (mensaje.getTipo()) {
                     case Mensaje.TEXTO:
-                        Servidor.reenviarMensaje(mensaje);
+                        if (nodoServidor != null) {
+                            // Modo distribuido: procesar via NodoServidor
+                            nodoServidor.procesarMensajeUsuario(mensaje);
+                        } else {
+                            // Modo standalone
+                            Servidor.reenviarMensaje(mensaje);
+                        }
                         break;
 
                     case Mensaje.ARCHIVO:
-                        System.out.println("[HILO-ENVIADOR-" + nombreUsuario + "] Archivo recibido: " +
+                        logServidor(nombreUsuario, "Archivo recibido: " +
                                 mensaje.getNombreArchivo() + " (" +
                                 (mensaje.getDatosAdjuntos() != null ?
                                         mensaje.getDatosAdjuntos().length : 0) + " bytes)");
-                        Servidor.reenviarMensaje(mensaje);
+                        if (nodoServidor != null) {
+                            nodoServidor.procesarMensajeUsuario(mensaje);
+                        } else {
+                            Servidor.reenviarMensaje(mensaje);
+                        }
                         break;
 
                     case Mensaje.DESCONECTAR:
-                        System.out.println("[HILO-ENVIADOR-" + nombreUsuario + "] Desconexión voluntaria.");
+                        logServidor(nombreUsuario, "Desconexión voluntaria.");
                         return;
 
                     default:
-                        System.out.println("[HILO-ENVIADOR-" + nombreUsuario + "] Tipo desconocido: " +
-                                mensaje.getTipo());
+                        logServidor(nombreUsuario, "Tipo desconocido: " + mensaje.getTipo());
                         break;
                 }
             }
 
         } catch (IOException e) {
-            System.out.println("[HILO-ENVIADOR-" + nombreUsuario + "] Error de red: " + e.getMessage());
+            logServidor(nombreUsuario, "Error de red: " + e.getMessage());
         } catch (ClassNotFoundException e) {
-            System.err.println("[HILO-ENVIADOR-" + nombreUsuario + "] Error de deserialización: " + e.getMessage());
+            System.err.println("[MANEJADOR-" + nombreUsuario + "] Error de deserialización: " + e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
             activo = false;
             if (nombreUsuario != null) {
-                Servidor.removerCliente(nombreUsuario);
+                if (nodoServidor != null) {
+                    nodoServidor.removerClienteLocal(nombreUsuario);
+                } else {
+                    Servidor.removerCliente(nombreUsuario);
+                }
             }
             try {
                 if (socket != null && !socket.isClosed()) {
                     socket.close();
-                    System.out.println("[HILO-ENVIADOR-" + nombreUsuario + "] Socket cerrado.");
+                    logServidor(nombreUsuario, "Socket cerrado.");
                 }
             } catch (IOException e) {
-                System.err.println("[HILO-ENVIADOR-" + nombreUsuario + "] Error cerrando socket: " + e.getMessage());
+                System.err.println("[MANEJADOR-" + nombreUsuario + "] Error cerrando socket: " + e.getMessage());
             }
-            System.out.println("[HILO-ENVIADOR-" + nombreUsuario + "] Hilo finalizado.");
+            logServidor(nombreUsuario, "Hilo finalizado.");
+        }
+    }
+
+    /**
+     * Envía el historial y mensajes offline al usuario que se conecta.
+     */
+    private void enviarHistorial(String nombre) {
+        // 1. Enviar historial permanente
+        java.util.List<Mensaje> historial = GestorBD.obtenerHistorialUsuario(nombre);
+        if (!historial.isEmpty()) {
+            Mensaje avisoHistorial = new Mensaje("SERVIDOR", nombre,
+                    Mensaje.NOTIFICACION,
+                    "📜 Restaurando tu historial de conversaciones (" + historial.size() + " mensajes):");
+            enviarMensaje(avisoHistorial);
+            for (Mensaje msgHistorial : historial) {
+                enviarMensaje(msgHistorial);
+            }
+        }
+
+        // 2. Enviar mensajes offline
+        java.util.List<Mensaje> pendientes = GestorBD.obtenerYBorrarMensajesOffline(nombre);
+        if (!pendientes.isEmpty()) {
+            Mensaje avisoOffline = new Mensaje("SERVIDOR", nombre,
+                    Mensaje.NOTIFICACION,
+                    "📬 Tienes " + pendientes.size() + " mensaje(s) nuevo(s) mientras estabas desconectado:");
+            enviarMensaje(avisoOffline);
+            for (Mensaje msgPendiente : pendientes) {
+                enviarMensaje(msgPendiente);
+                GestorBD.guardarMensajeHistorial(msgPendiente);
+            }
+        }
+
+        // 3. Enviar listas de usuarios
+        if (nodoServidor != null) {
+            nodoServidor.enviarListaUsuarios();
+        } else {
+            Servidor.enviarListaUsuarios();
+            Servidor.enviarListaOffline();
+        }
+
+        // 4. Notificar a todos
+        String infoNodo = (nodoServidor != null) ?
+                " (Nodo-" + nodoServidor.getNodoId() + ")" : "";
+        if (nodoServidor != null) {
+            nodoServidor.enviarNotificacion(nombre + " se ha conectado al chat." + infoNodo);
+        } else {
+            Servidor.enviarNotificacion(nombre + " se ha conectado al chat.");
         }
     }
 
@@ -175,8 +275,6 @@ public class ManejadorCliente implements Runnable {
      * Hilo despachador: extrae mensajes de la cola y los envía por el socket.
      */
     private void procesarBuzon() {
-        System.out.println("[HILO-RECEPTOR-" + nombreUsuario + "] Hilo Receptor iniciado.");
-
         try {
             while (activo) {
                 Mensaje mensaje = buzonMensajes.take();
@@ -187,7 +285,7 @@ public class ManejadorCliente implements Runnable {
             }
         } catch (IOException e) {
             if (activo) {
-                System.err.println("[HILO-RECEPTOR-" + nombreUsuario +
+                System.err.println("[MANEJADOR-" + nombreUsuario +
                         "] Error enviando por red: " + e.getMessage());
                 try {
                     if (socket != null && !socket.isClosed()) {
@@ -200,8 +298,6 @@ public class ManejadorCliente implements Runnable {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-
-        System.out.println("[HILO-RECEPTOR-" + nombreUsuario + "] Hilo Receptor finalizado.");
     }
 
     /**
@@ -211,7 +307,7 @@ public class ManejadorCliente implements Runnable {
     public void enviarMensaje(Mensaje mensaje) {
         boolean aceptado = buzonMensajes.offer(mensaje);
         if (!aceptado) {
-            System.err.println("[HILO-ENVIADOR-" + (nombreUsuario != null ? nombreUsuario : "NO_AUTENTICADO") + 
+            System.err.println("[MANEJADOR-" + (nombreUsuario != null ? nombreUsuario : "NO_AUTH") +
                     "] ADVERTENCIA: Buzón en memoria lleno (límite 1000). Mensaje descartado.");
         }
     }
@@ -222,4 +318,18 @@ public class ManejadorCliente implements Runnable {
     public String getNombreUsuario() {
         return nombreUsuario;
     }
+
+    /**
+     * Log helper que usa el sistema apropiado según el modo.
+     */
+    private void logServidor(String usuario, String mensaje) {
+        String nombre = (usuario != null) ? usuario : "NO_AUTH";
+        if (nodoServidor != null) {
+            nodoServidor.getLog().registrar(node.LogDistribuido.SISTEMA, null,
+                    "[MANEJADOR-" + nombre + "] " + mensaje);
+        } else {
+            System.out.println("[MANEJADOR-" + nombre + "] " + mensaje);
+        }
+    }
 }
+

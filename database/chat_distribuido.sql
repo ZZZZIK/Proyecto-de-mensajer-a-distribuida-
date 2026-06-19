@@ -2,10 +2,11 @@
 -- SCRIPT SQL — Base de datos para el Sistema de Mensajería Distribuida
 -- =====================================================================
 -- Ejecutar este script en phpMyAdmin (XAMPP) o en la consola MySQL.
--- Crea la base de datos 'chat_distribuido' con tres tablas:
+-- Crea la base de datos 'chat_distribuido' con cuatro tablas:
 --   1. usuarios: Registro permanente con autenticación (nombre + hash)
 --   2. mensajes_offline: Buzón temporal de mensajes no leídos
 --   3. historial_mensajes: Registro permanente de TODAS las conversaciones
+--   4. log_eventos: Log de eventos distribuidos con marcas vectoriales
 -- =====================================================================
 
 CREATE DATABASE IF NOT EXISTS chat_distribuido
@@ -60,4 +61,21 @@ CREATE TABLE IF NOT EXISTS historial_mensajes (
     INDEX idx_emisor (emisor),
     INDEX idx_receptor (receptor),
     INDEX idx_timestamp (timestamp)
+) ENGINE=InnoDB;
+
+-- ===== TABLA DE LOG DE EVENTOS DISTRIBUIDOS (Entrega 2) =====
+-- Registra eventos del sistema distribuido con marcas de reloj vectorial.
+-- Sirve como evidencia de los algoritmos de coordinación y ordenamiento.
+-- Categorías: MENSAJE, MUTEX, ELECCION, HEARTBEAT, FALLO, CONSENSO, NODO
+CREATE TABLE IF NOT EXISTS log_eventos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nodo_id INT NOT NULL,
+    categoria VARCHAR(20) NOT NULL,
+    reloj_vectorial VARCHAR(100),
+    descripcion TEXT NOT NULL,
+    timestamp_evento BIGINT NOT NULL,
+    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_nodo (nodo_id),
+    INDEX idx_categoria (categoria),
+    INDEX idx_timestamp (timestamp_evento)
 ) ENGINE=InnoDB;

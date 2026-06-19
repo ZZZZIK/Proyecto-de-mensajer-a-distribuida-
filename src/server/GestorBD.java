@@ -12,18 +12,29 @@ import java.util.List;
 public class GestorBD {
 
     // Configuración de conexión a MySQL (XAMPP por defecto)
-    private static final String URL = "jdbc:mysql://localhost:3306/chat_distribuido?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC";
-    private static final String USUARIO_BD = "root";
-    private static final String PASSWORD_BD = "";  // XAMPP por defecto no tiene contraseña
+    private static String url = "jdbc:mysql://localhost:3306/chat_distribuido?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC";
+    private static String usuarioBD = "root";
+    private static String passwordBD = "";  // XAMPP por defecto no tiene contraseña
 
     // Límite máximo de mensajes offline por usuario
     private static final int MAX_MENSAJES_OFFLINE = 100;
 
     /**
+     * Configura dinámicamente los parámetros de conexión de la base de datos.
+     */
+    public static void configurar(String host, String usuario, String password) {
+        // Si el host no tiene puerto especificado, asumir 3306
+        String hostConPuerto = host.contains(":") ? host : host + ":3306";
+        url = "jdbc:mysql://" + hostConPuerto + "/chat_distribuido?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC";
+        usuarioBD = usuario;
+        passwordBD = password;
+    }
+
+    /**
      * Establece una conexión con la base de datos MySQL.
      */
     private static Connection conectar() throws SQLException {
-        return DriverManager.getConnection(URL, USUARIO_BD, PASSWORD_BD);
+        return DriverManager.getConnection(url, usuarioBD, passwordBD);
     }
 
     /**
@@ -361,5 +372,23 @@ public class GestorBD {
             System.err.println("[GESTOR-BD] Error obteniendo historial: " + e.getMessage());
         }
         return historial;
+    }
+
+    /**
+     * Registra un evento del sistema distribuido en la tabla log_eventos de la BD.
+     */
+    public static void registrarEvento(int nodoId, String categoria, String relojVectorial, String descripcion) {
+        String sql = "INSERT INTO log_eventos (nodo_id, categoria, reloj_vectorial, descripcion, timestamp_evento) VALUES (?, ?, ?, ?, ?)";
+        try (Connection conn = conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, nodoId);
+            stmt.setString(2, categoria);
+            stmt.setString(3, relojVectorial);
+            stmt.setString(4, descripcion);
+            stmt.setLong(5, System.currentTimeMillis());
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            // No imprimir error si MySQL está apagado durante pruebas unitarias locales
+        }
     }
 }
