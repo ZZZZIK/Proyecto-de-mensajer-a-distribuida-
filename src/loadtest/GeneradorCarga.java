@@ -5,8 +5,12 @@ import java.io.*;
 import java.net.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
+import javax.swing.*;
+import java.awt.*;
+import java.awt.image.BufferedImage;
 
 /**
  * Generador de carga concurrente para prueba de tráfico real.
@@ -27,8 +31,8 @@ public class GeneradorCarga {
     private static final int TIEMPO_FALLA_SEG = 30;  // Falla inducida a los 30 seg
 
     // Conexión
-    private final String host;
-    private final int puerto;
+    private final String[] hosts;
+    private final int[] puertos;
     private final int numClientes;
     private final int duracionSegundos;
 
@@ -81,9 +85,9 @@ public class GeneradorCarga {
         }
     }
 
-    public GeneradorCarga(String host, int puerto, int numClientes, int duracionSegundos) {
-        this.host = host;
-        this.puerto = puerto;
+    public GeneradorCarga(String[] hosts, int[] puertos, int numClientes, int duracionSegundos) {
+        this.hosts = hosts;
+        this.puertos = puertos;
         this.numClientes = numClientes;
         this.duracionSegundos = duracionSegundos;
     }
@@ -146,8 +150,11 @@ public class GeneradorCarga {
      */
     private void registrarUsuarios() {
         for (int i = 0; i < numClientes; i++) {
+            int index = i % puertos.length;
+            String hostDestino = hosts[index];
+            int puertoDestino = puertos[index];
             try {
-                Socket socket = new Socket(host, puerto);
+                Socket socket = new Socket(hostDestino, puertoDestino);
                 ObjectOutputStream salida = new ObjectOutputStream(socket.getOutputStream());
                 salida.flush();
                 ObjectInputStream entrada = new ObjectInputStream(socket.getInputStream());
@@ -178,16 +185,21 @@ public class GeneradorCarga {
         private ObjectOutputStream salida;
         private ObjectInputStream entrada;
         private volatile boolean conectado = false;
+        private volatile String hostActual;
+        private volatile int puertoActual;
 
         public ClienteSimulado(int clienteId) {
             this.clienteId = clienteId;
+            int index = clienteId % puertos.length;
+            this.hostActual = hosts[index];
+            this.puertoActual = puertos[index];
         }
 
         @Override
         public void run() {
             try {
                 // Conectar
-                socket = new Socket(host, puerto);
+                socket = new Socket(hostActual, puertoActual);
                 salida = new ObjectOutputStream(socket.getOutputStream());
                 salida.flush();
                 entrada = new ObjectInputStream(socket.getInputStream());
@@ -207,43 +219,7 @@ public class GeneradorCarga {
                 clientesConectados.incrementAndGet();
 
                 // Iniciar hilo receptor (procesa mensajes de control)
-                Thread receptor = new Thread(() -> {
-                    try {
-                        while (ejecutando && conectado) {
-                            Mensaje msg = (Mensaje) entrada.readObject();
-                            if (msg != null && msg.getTipo().equals(Mensaje.NOTIFICACION)) {
-                                String cont = msg.getContenido();
-                                if (cont.contains("[FALLO DETECTADO]")) {
-                                    if (!fallaInducida) {
-                                        fallaInducida = true;
-                                        tiempoFalla = System.currentTimeMillis();
-                                    }
-                                } else if (cont.contains("[SISTEMA RECUPERADO]")) {
-                                    if (fallaInducida && tiempoRecuperacion == 0) {
-                                        tiempoRecuperacion = System.currentTimeMillis();
-                                    }
-                                } else if (cont.contains("[METRICAS_COORD]")) {
-                                    try {
-                                        String datos = cont.substring(cont.indexOf("mutex="));
-                                        String[] pparts = datos.split(",");
-                                        for (String p : pparts) {
-                                            String[] kv = p.trim().split("=");
-                                            if (kv.length == 2) {
-                                                switch (kv[0]) {
-                                                    case "mutex": mutexRequests.set(Long.parseLong(kv[1])); break;
-                                                    case "elecciones": eleccionesBully.set(Long.parseLong(kv[1])); break;
-                                                    case "total": mensajesCoordinacion.set(Long.parseLong(kv[1])); break;
-                                                }
-                                            }
-                                        }
-                                    } catch (Exception ex) { /* ignorar errores de parseo */ }
-                                }
-                            }
-                        }
-                    } catch (Exception e) { /* ignorar */ }
-                });
-                receptor.setDaemon(true);
-                receptor.start();
+                iniciarReceptor();
 
                 // Enviar mensajes continuamente
                 Random random = new Random(clienteId);
@@ -325,26 +301,95 @@ public class GeneradorCarga {
             }
         }
 
+        private void iniciarReceptor() {
+            Thread receptor = new Thread(() -> {
+                try {
+                    while (ejecutando && conectado) {
+                        Mensaje msg = (Mensaje) entrada.readObject();
+                        if (msg != null && msg.getTipo().equals(Mensaje.NOTIFICACION)) {
+                            String cont = msg.getContenido();
+                            if (cont.contains("[FALLO DETECTADO]")) {
+                                if (!fallaInducida) {
+                                    fallaInducida = true;
+                                    tiempoFalla = System.currentTimeMillis();
+                                }
+                            } else if (cont.contains("[SISTEMA RECUPERADO]")) {
+                                if (fallaInducida && tiempoRecuperacion == 0) {
+                                    tiempoRecuperacion = System.currentTimeMillis();
+                                }
+                            } else if (cont.contains("[METRICAS_COORD]")) {
+                                try {
+                                    String datos = cont.substring(cont.indexOf("mutex="));
+                                    String[] pparts = datos.split(",");
+                                    for (String p : pparts) {
+                                        String[] kv = p.trim().split("=");
+                                        if (kv.length == 2) {
+                                            switch (kv[0]) {
+                                                case "mutex": mutexRequests.set(Long.parseLong(kv[1])); break;
+                                                case "elecciones": eleccionesBully.set(Long.parseLong(kv[1])); break;
+                                                case "total": mensajesCoordinacion.set(Long.parseLong(kv[1])); break;
+                                            }
+                                        }
+                                    }
+                                } catch (Exception ex) { /* ignorar errores de parseo */ }
+                            }
+                        }
+                    }
+                } catch (Exception e) { /* ignorar */ }
+            });
+            receptor.setDaemon(true);
+            receptor.start();
+        }
+
         private void reconectar() {
-            try {
-                if (socket != null && !socket.isClosed()) socket.close();
-                socket = new Socket(host, puerto);
-                salida = new ObjectOutputStream(socket.getOutputStream());
-                salida.flush();
-                entrada = new ObjectInputStream(socket.getInputStream());
-
-                Mensaje login = new Mensaje("loadtest_" + clienteId, "SERVIDOR",
-                        Mensaje.LOGIN, "password123");
-                salida.writeObject(login);
-                salida.flush();
-
-                Mensaje resp = (Mensaje) entrada.readObject();
-                if (resp.getTipo().equals(Mensaje.AUTH_OK)) {
-                    conectado = true;
-                    clientesConectados.incrementAndGet();
+            // Encontrar el índice original
+            int indexOriginal = -1;
+            for (int i = 0; i < puertos.length; i++) {
+                if (puertos[i] == puertoActual && hosts[i].equals(hostActual)) {
+                    indexOriginal = i;
+                    break;
                 }
-            } catch (Exception e) {
-                // Reconexión fallida
+            }
+            if (indexOriginal == -1) indexOriginal = clienteId % puertos.length;
+
+            // Generar una lista de índices para probar, empezando por el actual
+            List<Integer> indices = new ArrayList<>();
+            indices.add(indexOriginal);
+            for (int i = 0; i < puertos.length; i++) {
+                if (i != indexOriginal) {
+                    indices.add(i);
+                }
+            }
+
+            for (int idx : indices) {
+                String h = hosts[idx];
+                int p = puertos[idx];
+                try {
+                    if (socket != null && !socket.isClosed()) socket.close();
+                    socket = new Socket(h, p);
+                    salida = new ObjectOutputStream(socket.getOutputStream());
+                    salida.flush();
+                    entrada = new ObjectInputStream(socket.getInputStream());
+
+                    Mensaje login = new Mensaje("loadtest_" + clienteId, "SERVIDOR",
+                            Mensaje.LOGIN, "password123");
+                    salida.writeObject(login);
+                    salida.flush();
+
+                    Mensaje resp = (Mensaje) entrada.readObject();
+                    if (resp.getTipo().equals(Mensaje.AUTH_OK)) {
+                        conectado = true;
+                        clientesConectados.incrementAndGet();
+                        this.hostActual = h;
+                        this.puertoActual = p;
+                        iniciarReceptor();
+                        return; // Reconectado con éxito
+                    } else {
+                        socket.close();
+                    }
+                } catch (Exception e) {
+                    // Falló este endpoint, intentar el siguiente
+                }
             }
         }
     }
@@ -488,7 +533,9 @@ public class GeneradorCarga {
 
         // Guardar CSV
         guardarCSV(todasLatencias, throughputAvg, latAvg, latP95, tasaError);
-        guardarReporteHTML(throughputAvg, latAvg, latP95, latP99, tasaError);
+        
+        // Mostrar gráfico en pantalla
+        mostrarGraficosSwing(throughputAvg, latAvg, latP95, latP99, tasaError);
     }
 
     /**
@@ -517,82 +564,202 @@ public class GeneradorCarga {
     }
 
     /**
-     * Genera un reporte HTML con gráficos embebidos usando Chart.js.
+     * Muestra una ventana de Swing en pantalla con los gráficos interactivos de la prueba.
      */
-    private void guardarReporteHTML(double throughput, double latAvg,
-                                     double latP95, double latP99, double tasaError) {
-        File dir = new File("resultados");
-        if (!dir.exists()) dir.mkdirs();
+    private void mostrarGraficosSwing(double throughputAvg, double latAvg, double latP95, double latP99, double tasaError) {
+        SwingUtilities.invokeLater(() -> {
+            JFrame frame = new JFrame("Reporte de Prueba de Carga — WhatsApp Distribuido");
+            frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+            frame.setSize(1100, 720);
+            frame.setLocationRelativeTo(null);
+            
+            Color bgDark = new Color(26, 26, 46);
+            frame.getContentPane().setBackground(bgDark);
+            frame.setLayout(new BorderLayout());
 
-        String fecha = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
-        String archivo = "resultados/reporte_" + fecha + ".html";
+            // Header panel with summary text
+            JPanel header = new JPanel(new GridLayout(2, 4, 10, 5));
+            header.setBackground(new Color(22, 22, 40));
+            header.setBorder(BorderFactory.createEmptyBorder(15, 20, 15, 20));
+            
+            JLabel lblClientes = new JLabel("<html>Clientes:<br><font color='#25d366' size='5'><b>" + numClientes + "</b></font></html>");
+            JLabel lblThroughput = new JLabel(String.format("<html>Throughput Avg:<br><font color='#25d366' size='5'><b>%.1f req/s</b></font></html>", throughputAvg));
+            JLabel lblLatencia = new JLabel(String.format("<html>Latencia Avg:<br><font color='#3498db' size='5'><b>%.1f ms</b></font></html>", latAvg));
+            JLabel lblP95 = new JLabel(String.format("<html>Latencia p95:<br><font color='#e74c3c' size='5'><b>%.1f ms</b></font></html>", latP95));
+            JLabel lblP99 = new JLabel(String.format("<html>Latencia p99:<br><font color='#e74c3c' size='4'><b>%.1f ms</b></font></html>", latP99));
+            JLabel lblErrores = new JLabel(String.format("<html>Tasa Error:<br><font color='#e74c3c' size='5'><b>%.2f%%</b></font></html>", tasaError));
+            JLabel lblCoord = new JLabel("<html>Coord Msgs:<br><font color='#f1c40f' size='5'><b>" + mensajesCoordinacion.get() + "</b></font></html>");
+            
+            JButton btnExport = new JButton("💾 Exportar PNG");
+            btnExport.setBackground(new Color(37, 211, 102));
+            btnExport.setForeground(Color.WHITE);
+            btnExport.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            btnExport.setFocusPainted(false);
+            btnExport.setBorder(BorderFactory.createEmptyBorder(8, 15, 8, 15));
 
-        try (PrintWriter pw = new PrintWriter(new FileWriter(archivo))) {
-            pw.println("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
-            pw.println("<title>Reporte de Prueba de Carga — WhatsApp Distribuido</title>");
-            pw.println("<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>");
-            pw.println("<style>body{font-family:Arial;max-width:1200px;margin:0 auto;padding:20px;background:#1a1a2e;color:#eee}");
-            pw.println("h1{color:#25d366;text-align:center}.card{background:#16213e;border-radius:10px;padding:20px;margin:15px 0}");
-            pw.println("table{width:100%;border-collapse:collapse}td,th{padding:10px;border:1px solid #334}");
-            pw.println("th{background:#0f3460;color:#25d366}canvas{max-height:400px}</style></head><body>");
-
-            pw.println("<h1>📊 Reporte de Prueba de Carga — WhatsApp Distribuido</h1>");
-            pw.println("<div class='card'><h2>Resumen de Métricas</h2>");
-            pw.println("<table><tr><th>Métrica</th><th>Valor</th></tr>");
-            pw.printf("<tr><td>Clientes simultáneos</td><td>%d</td></tr>%n", numClientes);
-            pw.printf("<tr><td>Duración</td><td>%d segundos</td></tr>%n", duracionSegundos);
-            pw.printf("<tr><td>Peticiones totales</td><td>%,d</td></tr>%n", peticionesExitosas.get());
-            pw.printf("<tr><td>Throughput promedio</td><td>%.1f req/s</td></tr>%n", throughput);
-            pw.printf("<tr><td>Latencia promedio</td><td>%.1f ms</td></tr>%n", latAvg);
-            pw.printf("<tr><td>Latencia p95</td><td>%.1f ms</td></tr>%n", latP95);
-            pw.printf("<tr><td>Latencia p99</td><td>%.1f ms</td></tr>%n", latP99);
-            pw.printf("<tr><td>Tasa de error</td><td>%.2f%%</td></tr>%n", tasaError);
-            pw.printf("<tr><td>Archivos enviados</td><td>%,d</td></tr>%n", archivosEnviados.get());
-            pw.printf("<tr><td>Mensajes de coordinación</td><td>%,d</td></tr>%n", mensajesCoordinacion.get());
-            pw.printf("<tr><td>Mutex requests</td><td>%,d</td></tr>%n", mutexRequests.get());
-            pw.printf("<tr><td>Elecciones Bully</td><td>%,d</td></tr>%n", eleccionesBully.get());
-            pw.println("</table></div>");
-
-            // Gráfico de Throughput
-            pw.println("<div class='card'><h2>Throughput (req/s) vs Tiempo</h2>");
-            pw.println("<canvas id='chartThroughput'></canvas></div>");
-
-            // Gráfico de Latencia
-            pw.println("<div class='card'><h2>Latencia (ms) vs Tiempo</h2>");
-            pw.println("<canvas id='chartLatencia'></canvas></div>");
-
-            // Datos para gráficos
-            StringBuilder labels = new StringBuilder("[");
-            StringBuilder dataThroughput = new StringBuilder("[");
-            StringBuilder dataLatAvg = new StringBuilder("[");
-            StringBuilder dataLatP95 = new StringBuilder("[");
-
-            for (MuestraSegundo m : muestrasPorSegundo) {
-                labels.append(m.segundo).append(",");
-                dataThroughput.append(m.throughput).append(",");
-                dataLatAvg.append(String.format("%.1f", m.latenciaAvg)).append(",");
-                dataLatP95.append(String.format("%.1f", m.latenciaP95)).append(",");
+            for (JLabel lbl : new JLabel[]{lblClientes, lblThroughput, lblLatencia, lblP95, lblP99, lblErrores, lblCoord}) {
+                lbl.setForeground(Color.WHITE);
+                lbl.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+                header.add(lbl);
             }
-            labels.append("]");
-            dataThroughput.append("]");
-            dataLatAvg.append("]");
-            dataLatP95.append("]");
+            header.add(btnExport);
+            
+            frame.add(header, BorderLayout.NORTH);
 
-            pw.println("<script>");
-            pw.println("new Chart(document.getElementById('chartThroughput'),{type:'line',data:{");
-            pw.println("labels:" + labels + ",datasets:[{label:'Throughput (req/s)',data:" +
-                    dataThroughput + ",borderColor:'#25d366',fill:false,tension:0.3}]}});");
-            pw.println("new Chart(document.getElementById('chartLatencia'),{type:'line',data:{");
-            pw.println("labels:" + labels + ",datasets:[{label:'Latencia Avg (ms)',data:" +
-                    dataLatAvg + ",borderColor:'#3498db',fill:false,tension:0.3},");
-            pw.println("{label:'Latencia p95 (ms)',data:" + dataLatP95 +
-                    ",borderColor:'#e74c3c',fill:false,tension:0.3}]}});");
-            pw.println("</script></body></html>");
+            // Chart area split in two
+            JPanel chartsPanel = new JPanel(new GridLayout(1, 2, 15, 0));
+            chartsPanel.setBackground(bgDark);
+            chartsPanel.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
 
-            System.out.println("[CARGA] Reporte HTML guardado en: " + archivo);
+            List<Double> thData = new ArrayList<>();
+            List<Double> latAvgData = new ArrayList<>();
+            List<Double> latP95Data = new ArrayList<>();
+            for (MuestraSegundo m : muestrasPorSegundo) {
+                thData.add((double) m.throughput);
+                latAvgData.add(m.latenciaAvg);
+                latP95Data.add(m.latenciaP95);
+            }
 
-        } catch (IOException e) {
-            System.err.println("[CARGA] Error guardando reporte HTML: " + e.getMessage());
+            PanelGraficoMultilinea thChart = new PanelGraficoMultilinea("Throughput (req/s) vs Tiempo", "req/s");
+            thChart.agregarSerie(thData, new Color(37, 211, 102), "Throughput");
+
+            PanelGraficoMultilinea latChart = new PanelGraficoMultilinea("Latencia (ms) vs Tiempo", "ms");
+            latChart.agregarSerie(latAvgData, new Color(52, 152, 219), "Promedio");
+            latChart.agregarSerie(latP95Data, new Color(231, 76, 60), "p95");
+
+            chartsPanel.add(thChart);
+            chartsPanel.add(latChart);
+
+            frame.add(chartsPanel, BorderLayout.CENTER);
+
+            // Export action to save the generated charts as PNG
+            btnExport.addActionListener(e -> {
+                BufferedImage img = new BufferedImage(chartsPanel.getWidth(), chartsPanel.getHeight(), BufferedImage.TYPE_INT_RGB);
+                Graphics2D g2 = img.createGraphics();
+                chartsPanel.paint(g2);
+                g2.dispose();
+                
+                String fecha = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+                File file = new File("resultados/grafico_" + fecha + ".png");
+                try {
+                    javax.imageio.ImageIO.write(img, "png", file);
+                    JOptionPane.showMessageDialog(frame, "Gráfico guardado en: " + file.getAbsolutePath(), "Éxito", JOptionPane.INFORMATION_MESSAGE);
+                } catch (IOException ex) {
+                    JOptionPane.showMessageDialog(frame, "Error al guardar el gráfico: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            });
+
+            frame.setVisible(true);
+        });
+    }
+
+    /**
+     * Componente Swing personalizado para dibujar gráficos lineales interactivos con múltiples series de datos.
+     */
+    private static class PanelGraficoMultilinea extends JPanel {
+        private final List<List<Double>> series;
+        private final List<Color> colores;
+        private final List<String> leyendas;
+        private final String titulo;
+        private final String etiquetaY;
+
+        public PanelGraficoMultilinea(String titulo, String etiquetaY) {
+            this.titulo = titulo;
+            this.etiquetaY = etiquetaY;
+            this.series = new ArrayList<>();
+            this.colores = new ArrayList<>();
+            this.leyendas = new ArrayList<>();
+            setBackground(new Color(26, 26, 46));
+        }
+
+        public void agregarSerie(List<Double> datos, Color color, String leyenda) {
+            this.series.add(datos);
+            this.colores.add(color);
+            this.leyendas.add(leyenda);
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            int width = getWidth();
+            int height = getHeight();
+            int padding = 55;
+
+            // Draw panel background
+            g2.setColor(new Color(22, 33, 62));
+            g2.fillRect(padding, padding, width - 2 * padding, height - 2 * padding);
+
+            // Draw chart border
+            g2.setColor(new Color(53, 53, 85));
+            g2.drawRect(padding, padding, width - 2 * padding, height - 2 * padding);
+
+            if (series.isEmpty() || series.get(0).isEmpty()) return;
+
+            int nPuntos = series.get(0).size();
+
+            // Find max value in all series for y-axis scaling
+            double maxVal = 0;
+            for (List<Double> datos : series) {
+                for (double val : datos) {
+                    if (val > maxVal) maxVal = val;
+                }
+            }
+            if (maxVal == 0) maxVal = 1;
+
+            // Title
+            g2.setColor(Color.WHITE);
+            g2.setFont(new Font("Segoe UI", Font.BOLD, 15));
+            g2.drawString(titulo, padding, padding - 20);
+
+            // Legends
+            g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            int startX = padding + 150;
+            for (int i = 0; i < series.size(); i++) {
+                g2.setColor(colores.get(i));
+                g2.fillRect(startX, padding - 28, 12, 12);
+                g2.setColor(Color.WHITE);
+                g2.drawString(leyendas.get(i), startX + 18, padding - 18);
+                startX += 140;
+            }
+
+            // Draw Y-axis divisions and labels
+            g2.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+            for (int i = 0; i <= 5; i++) {
+                int y = height - padding - (int) ((height - 2 * padding) * i / 5.0);
+                double val = maxVal * i / 5.0;
+                g2.setColor(new Color(53, 53, 85));
+                g2.drawLine(padding, y, width - padding, y);
+                g2.setColor(Color.WHITE);
+                g2.drawString(String.format("%.1f %s", val, etiquetaY), padding - 50, y + 4);
+            }
+
+            // Draw X-axis divisions and labels (seconds)
+            double xScale = ((double) width - 2 * padding) / (nPuntos - 1);
+            for (int i = 0; i < nPuntos; i += Math.max(1, nPuntos / 10)) {
+                int x = padding + (int) (i * xScale);
+                g2.setColor(new Color(53, 53, 85));
+                g2.drawLine(x, padding, x, height - padding);
+                g2.setColor(Color.WHITE);
+                g2.drawString(String.valueOf(i + 1) + "s", x - 5, height - padding + 18);
+            }
+
+            // Draw series line graphs
+            double yScale = ((double) height - 2 * padding) / maxVal;
+            g2.setStroke(new BasicStroke(2.5f));
+            for (int s = 0; s < series.size(); s++) {
+                List<Double> datos = series.get(s);
+                g2.setColor(colores.get(s));
+                for (int i = 0; i < nPuntos - 1; i++) {
+                    int x1 = padding + (int) (i * xScale);
+                    int y1 = height - padding - (int) (datos.get(i) * yScale);
+                    int x2 = padding + (int) ((i + 1) * xScale);
+                    int y2 = height - padding - (int) (datos.get(i + 1) * yScale);
+                    g2.drawLine(x1, y1, x2, y2);
+                }
+            }
         }
     }
 
@@ -600,23 +767,66 @@ public class GeneradorCarga {
         System.out.println("╔═══════════════════════════════════════════════════════════════╗");
         System.out.println("║       GENERADOR DE CARGA — WhatsApp Distribuido              ║");
         System.out.println("╠═══════════════════════════════════════════════════════════════╣");
-        System.out.printf( "║  Servidor:       %s:%d                                       ║%n", host, puerto);
-        System.out.printf( "║  Clientes:       %d                                          ║%n", numClientes);
-        System.out.printf( "║  Duración:       %d segundos                                 ║%n", duracionSegundos);
+        System.out.println("║  Servidores:     " + Arrays.toString(getEndpointsFormatted()));
+        System.out.println("║  Clientes:       " + numClientes);
+        System.out.println("║  Duración:       " + duracionSegundos + " segundos");
         System.out.println("╚═══════════════════════════════════════════════════════════════╝");
+    }
+
+    private String[] getEndpointsFormatted() {
+        String[] formatted = new String[puertos.length];
+        for (int i = 0; i < puertos.length; i++) {
+            formatted[i] = hosts[i] + ":" + puertos[i];
+        }
+        return formatted;
     }
 
     /**
      * Punto de entrada.
-     * Uso: java loadtest.GeneradorCarga [host] [puerto] [clientes] [duracion_seg]
+     * Uso: java loadtest.GeneradorCarga [host] [puerto(s)] [clientes] [duracion_seg]
      */
     public static void main(String[] args) {
-        String host = args.length > 0 ? args[0] : "localhost";
-        int puerto = args.length > 1 ? Integer.parseInt(args[1]) : 5001;
+        String hostDefault = args.length > 0 ? args[0] : "localhost";
+        
+        String[] hosts;
+        int[] ports;
+        
+        if (args.length > 1) {
+            String portArg = args[1];
+            if (portArg.contains(",")) {
+                String[] parts = portArg.split(",");
+                hosts = new String[parts.length];
+                ports = new int[parts.length];
+                for (int i = 0; i < parts.length; i++) {
+                    String part = parts[i].trim();
+                    if (part.contains(":")) {
+                        String[] hp = part.split(":");
+                        hosts[i] = hp[0];
+                        ports[i] = Integer.parseInt(hp[1]);
+                    } else {
+                        hosts[i] = hostDefault;
+                        ports[i] = Integer.parseInt(part);
+                    }
+                }
+            } else {
+                if (portArg.contains(":")) {
+                    String[] hp = portArg.split(":");
+                    hosts = new String[]{hp[0]};
+                    ports = new int[]{Integer.parseInt(hp[1])};
+                } else {
+                    hosts = new String[]{hostDefault};
+                    ports = new int[]{Integer.parseInt(portArg)};
+                }
+            }
+        } else {
+            hosts = new String[]{"localhost", "localhost", "localhost"};
+            ports = new int[]{5001, 5002, 5003};
+        }
+        
         int clientes = args.length > 2 ? Integer.parseInt(args[2]) : NUM_CLIENTES_DEFAULT;
         int duracion = args.length > 3 ? Integer.parseInt(args[3]) : DURACION_DEFAULT_SEG;
 
-        GeneradorCarga carga = new GeneradorCarga(host, puerto, clientes, duracion);
+        GeneradorCarga carga = new GeneradorCarga(hosts, ports, clientes, duracion);
         carga.ejecutar();
     }
 }
