@@ -538,6 +538,7 @@ public class NodoServidor {
     public int getCoordinadorActual()           { return coordinadorActual; }
     public Map<String, ManejadorCliente> getClientesLocales() { return clientesLocales; }
     public int getTotalNodos()                  { return totalNodos; }
+    public List<InfoNodo> getPeers()            { return peers; }
 
     public void setCoordinadorActual(int id) {
         this.coordinadorActual = id;

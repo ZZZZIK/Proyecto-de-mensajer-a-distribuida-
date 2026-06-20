@@ -257,3 +257,21 @@
 [2026-06-19 17:08:46.751] [NODO-0] [V=[467, 442, 419]] [MUTEX] REQUEST_ENVIADO — → Nodo-2
 [2026-06-19 17:08:46.758] [NODO-0] [V=[471, 446, 421]] [MUTEX] SC_ENTRADA — ★ Entró a la Sección Crítica (todas las respuestas recibidas)
 [2026-06-19 17:08:46.782] [NODO-0] [V=[472, 446, 421]] [MUTEX] SC_SALIDA — Salió de la Sección Crítica. Respondiendo a 0 solicitudes diferidas.
+[2026-06-19 17:31:28.744] [NODO-0] [V=[-]] [SISTEMA] === LOG INICIADO — Nodo 0 — 2026-06-19 17:31:28.741 ===
+[2026-06-19 17:31:28.756] [NODO-0] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-19 17:31:28.758] [NODO-0] [V=[-]] [SISTEMA]   NODO-0 — WhatsApp Distribuido Multinodo
+[2026-06-19 17:31:28.758] [NODO-0] [V=[-]] [SISTEMA]   Puerto clientes: 5001
+[2026-06-19 17:31:28.758] [NODO-0] [V=[-]] [SISTEMA]   Puerto inter-nodo: 5101
+[2026-06-19 17:31:28.760] [NODO-0] [V=[-]] [SISTEMA]   Peers configurados: 2
+[2026-06-19 17:31:28.760] [NODO-0] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-19 17:31:29.098] [NODO-0] [V=[-]] [NODO] Escuchando conexiones inter-nodo en puerto 5101
+[2026-06-19 17:31:29.599] [NODO-0] [V=[-]] [NODO] Esperando conexión con peers (máximo 10 segundos)...
+[2026-06-19 17:31:31.660] [NODO-0] [V=[-]] [NODO] Conexión entrante aceptada de Nodo-1
+[2026-06-19 17:31:32.105] [NODO-0] [V=[-]] [NODO] Peers conectados: 1/2
+[2026-06-19 17:31:32.107] [NODO-0] [V=[-]] [HEARTBEAT] Gestor de Heartbeats iniciado (intervalo=2000ms, maxFallos=3)
+[2026-06-19 17:31:33.707] [NODO-0] [V=[1, 2, 0]] [ELECCION] COORDINADOR_ACEPTADO — Nuevo coordinador: Nodo-1 (anterior: Nodo--1)
+[2026-06-19 17:31:34.113] [NODO-0] [V=[3, 3, 0]] [ELECCION] COORDINADOR_INICIAL — Coordinador inicial determinado: Nodo-1
+[2026-06-19 17:31:34.116] [NODO-0] [V=[-]] [SISTEMA] Aceptando clientes en puerto 5001
+[2026-06-19 17:31:34.295] [NODO-0] [V=[-]] [NODO] Conexión entrante aceptada de Nodo-2
+[2026-06-19 17:31:36.319] [NODO-0] [V=[11, 11, 7]] [ELECCION] COORDINADOR_ACEPTADO — Nuevo coordinador: Nodo-2 (anterior: Nodo-1)
+[2026-06-19 17:31:51.192] [NODO-0] [V=[63, 63, 62]] [CONSENSO] APPEND_RECIBIDO — Entrada recibida del líder: [T0:I0] CONECTADO Usuario4@Nodo-2

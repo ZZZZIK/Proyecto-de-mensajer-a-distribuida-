@@ -184,3 +184,24 @@
 [2026-06-19 17:09:31.748] [NODO-1] [V=[-]] [NODO] No se pudo conectar a Nodo-0 (localhost:5001): Connection refused: getsockopt
 [2026-06-19 17:09:36.746] [NODO-1] [V=[-]] [NODO] No se pudo conectar a Nodo-0 (localhost:5001): Connection refused: getsockopt
 [2026-06-19 17:09:41.758] [NODO-1] [V=[-]] [NODO] No se pudo conectar a Nodo-0 (localhost:5001): Connection refused: getsockopt
+[2026-06-19 17:31:30.791] [NODO-1] [V=[-]] [SISTEMA] === LOG INICIADO — Nodo 1 — 2026-06-19 17:31:30.790 ===
+[2026-06-19 17:31:30.803] [NODO-1] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-19 17:31:30.805] [NODO-1] [V=[-]] [SISTEMA]   NODO-1 — WhatsApp Distribuido Multinodo
+[2026-06-19 17:31:30.805] [NODO-1] [V=[-]] [SISTEMA]   Puerto clientes: 5002
+[2026-06-19 17:31:30.805] [NODO-1] [V=[-]] [SISTEMA]   Puerto inter-nodo: 5102
+[2026-06-19 17:31:30.806] [NODO-1] [V=[-]] [SISTEMA]   Peers configurados: 2
+[2026-06-19 17:31:30.807] [NODO-1] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-19 17:31:31.133] [NODO-1] [V=[-]] [NODO] Escuchando conexiones inter-nodo en puerto 5102
+[2026-06-19 17:31:31.654] [NODO-1] [V=[-]] [NODO] Conectado exitosamente a Nodo-0 (localhost:5001)
+[2026-06-19 17:31:31.657] [NODO-1] [V=[-]] [NODO] Esperando conexión con peers (máximo 10 segundos)...
+[2026-06-19 17:31:31.661] [NODO-1] [V=[-]] [NODO] Peers conectados: 1/2
+[2026-06-19 17:31:31.663] [NODO-1] [V=[-]] [HEARTBEAT] Gestor de Heartbeats iniciado (intervalo=2000ms, maxFallos=3)
+[2026-06-19 17:31:31.665] [NODO-1] [V=[0, 1, 0]] [NODO] Nodo-0 se unió al sistema
+[2026-06-19 17:31:33.664] [NODO-1] [V=[0, 1, 0]] [ELECCION] COORDINADOR_INICIAL — Coordinador inicial determinado: Nodo-1
+[2026-06-19 17:31:33.666] [NODO-1] [V=[0, 2, 0]] [ELECCION] NUEVO_COORDINADOR — ★ Nodo-1 es el nuevo COORDINADOR ★
+[2026-06-19 17:31:33.709] [NODO-1] [V=[-]] [SISTEMA] Aceptando clientes en puerto 5002
+[2026-06-19 17:31:34.303] [NODO-1] [V=[-]] [NODO] Conexión entrante aceptada de Nodo-2
+[2026-06-19 17:31:36.319] [NODO-1] [V=[8, 12, 7]] [ELECCION] COORDINADOR_ACEPTADO — Nuevo coordinador: Nodo-2 (anterior: Nodo-1)
+[2026-06-19 17:31:51.223] [NODO-1] [V=[62, 64, 62]] [CONSENSO] APPEND_RECIBIDO — Entrada recibida del líder: [T0:I0] CONECTADO Usuario4@Nodo-2
+[2026-06-19 17:58:34.575] [NODO-1] [V=[-]] [FALLO] Conexión perdida con Nodo-0: Connection reset
+[2026-06-19 17:58:34.577] [NODO-1] [V=[5674, 5680, 5676]] [FALLO] ⚠ Peer desconectado: Nodo-0

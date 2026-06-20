@@ -21,12 +21,8 @@ if %ERRORLEVEL% NEQ 0 goto ERROR
 javac -encoding UTF-8 -cp "lib\mysql-connector-j.jar;bin" --release 21 -d bin src\node\ConectorNodos.java src\node\GestorHeartbeat.java src\node\AlgoritmoBully.java src\node\MutexRicartAgrawala.java src\node\ConsensoRaft.java
 if %ERRORLEVEL% NEQ 0 goto ERROR
 
-echo Compilando ManejadorCliente y Servidor...
-javac -encoding UTF-8 -cp "lib\mysql-connector-j.jar;bin" --release 21 -d bin src\server\ManejadorCliente.java src\server\Servidor.java
-if %ERRORLEVEL% NEQ 0 goto ERROR
-
-echo Compilando NodoServidor...
-javac -encoding UTF-8 -cp "lib\mysql-connector-j.jar;bin" --release 21 -d bin src\node\NodoServidor.java
+echo Compilando ManejadorCliente, Servidor y NodoServidor...
+javac -encoding UTF-8 -cp "lib\mysql-connector-j.jar;bin" --release 21 -d bin src\server\ManejadorCliente.java src\server\Servidor.java src\node\NodoServidor.java
 if %ERRORLEVEL% NEQ 0 goto ERROR
 
 echo Compilando cliente...

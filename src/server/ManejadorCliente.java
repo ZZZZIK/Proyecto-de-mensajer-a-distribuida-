@@ -132,6 +132,20 @@ public class ManejadorCliente implements Runnable {
                         " Conexión exitosa.");
                 enviarMensaje(bienvenida);
 
+                // Enviar la lista de todos los nodos activos en la red al cliente para reconexión dinámica
+                if (nodoServidor != null) {
+                    StringBuilder sb = new StringBuilder("[LISTA_NODOS]");
+                    String localIp = socket.getLocalAddress().getHostAddress();
+                    int localPort = socket.getLocalPort();
+                    sb.append(localIp).append(":").append(localPort);
+                    for (node.InfoNodo peer : nodoServidor.getPeers()) {
+                        sb.append(",").append(peer.getHost()).append(":").append(peer.getPuerto());
+                    }
+                    Mensaje listaNodosMsg = new Mensaje("SERVIDOR", nombreUsuario,
+                            Mensaje.NOTIFICACION, sb.toString());
+                    enviarMensaje(listaNodosMsg);
+                }
+
                 // Registrar en el sistema correspondiente
                 boolean enMemoria;
                 if (nodoServidor != null) {

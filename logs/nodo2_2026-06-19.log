@@ -398,3 +398,52 @@
 [2026-06-19 17:11:59.110] [NODO-2] [V=[-]] [NODO] No se pudo conectar a Nodo-1 (localhost:5002): Connection refused: getsockopt
 [2026-06-19 17:12:04.116] [NODO-2] [V=[-]] [NODO] No se pudo conectar a Nodo-0 (localhost:5001): Connection refused: getsockopt
 [2026-06-19 17:12:04.117] [NODO-2] [V=[-]] [NODO] No se pudo conectar a Nodo-1 (localhost:5002): Connection refused: getsockopt
+[2026-06-19 17:31:33.402] [NODO-2] [V=[-]] [SISTEMA] === LOG INICIADO — Nodo 2 — 2026-06-19 17:31:33.399 ===
+[2026-06-19 17:31:33.414] [NODO-2] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-19 17:31:33.416] [NODO-2] [V=[-]] [SISTEMA]   NODO-2 — WhatsApp Distribuido Multinodo
+[2026-06-19 17:31:33.417] [NODO-2] [V=[-]] [SISTEMA]   Puerto clientes: 5003
+[2026-06-19 17:31:33.418] [NODO-2] [V=[-]] [SISTEMA]   Puerto inter-nodo: 5103
+[2026-06-19 17:31:33.419] [NODO-2] [V=[-]] [SISTEMA]   Peers configurados: 2
+[2026-06-19 17:31:33.419] [NODO-2] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-19 17:31:33.784] [NODO-2] [V=[-]] [NODO] Escuchando conexiones inter-nodo en puerto 5103
+[2026-06-19 17:31:34.296] [NODO-2] [V=[-]] [NODO] Conectado exitosamente a Nodo-0 (localhost:5001)
+[2026-06-19 17:31:34.302] [NODO-2] [V=[0, 0, 1]] [NODO] Nodo-0 se unió al sistema
+[2026-06-19 17:31:34.302] [NODO-2] [V=[-]] [NODO] Conectado exitosamente a Nodo-1 (localhost:5002)
+[2026-06-19 17:31:34.306] [NODO-2] [V=[-]] [NODO] Esperando conexión con peers (máximo 10 segundos)...
+[2026-06-19 17:31:34.308] [NODO-2] [V=[-]] [NODO] Peers conectados: 2/2
+[2026-06-19 17:31:34.310] [NODO-2] [V=[0, 0, 2]] [NODO] Nodo-1 se unió al sistema
+[2026-06-19 17:31:34.311] [NODO-2] [V=[-]] [HEARTBEAT] Gestor de Heartbeats iniciado (intervalo=2000ms, maxFallos=3)
+[2026-06-19 17:31:36.315] [NODO-2] [V=[8, 7, 6]] [ELECCION] COORDINADOR_INICIAL — Coordinador inicial determinado: Nodo-2
+[2026-06-19 17:31:36.317] [NODO-2] [V=[8, 7, 7]] [ELECCION] NUEVO_COORDINADOR — ★ Nodo-2 es el nuevo COORDINADOR ★
+[2026-06-19 17:31:36.324] [NODO-2] [V=[-]] [SISTEMA] Aceptando clientes en puerto 5003
+[2026-06-19 17:31:51.138] [NODO-2] [V=[62, 63, 60]] [NODO] Nueva conexión de cliente desde 127.0.0.1
+[2026-06-19 17:31:51.160] [NODO-2] [V=[-]] [SISTEMA] [MANEJADOR-Usuario4] Cuenta creada exitosamente.
+[2026-06-19 17:31:51.162] [NODO-2] [V=[62, 63, 61]] [MENSAJE] CONECTADO: Usuario4 → SISTEMA "Usuario conectado en Nodo-2"
+[2026-06-19 17:31:51.171] [NODO-2] [V=[62, 63, 61]] [CONSENSO] PROPUESTA_LIDER — Nueva entrada: [T0:I0] CONECTADO Usuario4@Nodo-2
+[2026-06-19 17:31:51.173] [NODO-2] [V=[62, 63, 62]] [CONSENSO] APPEND_ENVIADO — Entrada [T0:I0] CONECTADO Usuario4@Nodo-2 enviada a seguidores
+[2026-06-19 17:31:51.198] [NODO-2] [V=[64, 63, 63]] [CONSENSO] ACK_RECIBIDO — ACK de Nodo-0 para entrada 0 (total ACKs: 2/3)
+[2026-06-19 17:31:51.224] [NODO-2] [V=[64, 65, 64]] [CONSENSO] ACK_RECIBIDO — ACK de Nodo-1 para entrada 0 (total ACKs: 3/3)
+[2026-06-19 17:31:51.253] [NODO-2] [V=[64, 65, 64]] [CONSENSO] COMMIT — ★ Entrada commiteada por quórum (3/3): [T0:I0] CONECTADO Usuario4@Nodo-2
+[2026-06-19 17:31:51.266] [NODO-2] [V=[-]] [SISTEMA] [MANEJADOR-Usuario4] Hilo Enviador iniciado.
+[2026-06-19 17:58:34.575] [NODO-2] [V=[-]] [FALLO] Conexión perdida con Nodo-0: Connection reset
+[2026-06-19 17:58:34.577] [NODO-2] [V=[5678, 5679, 5679]] [FALLO] ⚠ Peer desconectado: Nodo-0
+[2026-06-19 17:58:35.374] [NODO-2] [V=[-]] [FALLO] Conexión perdida con Nodo-1: Connection reset
+[2026-06-19 17:58:35.374] [NODO-2] [V=[5678, 5679, 5680]] [FALLO] ⚠ Peer desconectado: Nodo-1
+[2026-06-19 18:30:07.117] [NODO-2] [V=[-]] [SISTEMA] === LOG INICIADO — Nodo 2 — 2026-06-19 18:30:07.116 ===
+[2026-06-19 18:30:07.128] [NODO-2] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-19 18:30:07.129] [NODO-2] [V=[-]] [SISTEMA]   NODO-2 — WhatsApp Distribuido Multinodo
+[2026-06-19 18:30:07.130] [NODO-2] [V=[-]] [SISTEMA]   Puerto clientes: 5003
+[2026-06-19 18:30:07.130] [NODO-2] [V=[-]] [SISTEMA]   Puerto inter-nodo: 5103
+[2026-06-19 18:30:07.131] [NODO-2] [V=[-]] [SISTEMA]   Peers configurados: 2
+[2026-06-19 18:30:07.131] [NODO-2] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-19 18:30:07.570] [NODO-2] [V=[-]] [NODO] Escuchando conexiones inter-nodo en puerto 5103
+[2026-06-19 18:30:08.129] [NODO-2] [V=[-]] [NODO] Conectado exitosamente a Nodo-0 (100.82.103.13:5001)
+[2026-06-19 18:30:08.187] [NODO-2] [V=[-]] [NODO] Conectado exitosamente a Nodo-1 (100.82.103.13:5002)
+[2026-06-19 18:30:08.189] [NODO-2] [V=[-]] [NODO] Esperando conexión con peers (máximo 10 segundos)...
+[2026-06-19 18:30:08.192] [NODO-2] [V=[-]] [NODO] Peers conectados: 2/2
+[2026-06-19 18:30:08.194] [NODO-2] [V=[-]] [HEARTBEAT] Gestor de Heartbeats iniciado (intervalo=2000ms, maxFallos=3)
+[2026-06-19 18:30:08.267] [NODO-2] [V=[0, 0, 1]] [NODO] Nodo-0 se unió al sistema
+[2026-06-19 18:30:08.390] [NODO-2] [V=[0, 0, 2]] [NODO] Nodo-1 se unió al sistema
+[2026-06-19 18:30:10.195] [NODO-2] [V=[134, 98, 7]] [ELECCION] COORDINADOR_INICIAL — Coordinador inicial determinado: Nodo-2
+[2026-06-19 18:30:10.196] [NODO-2] [V=[134, 98, 8]] [ELECCION] NUEVO_COORDINADOR — ★ Nodo-2 es el nuevo COORDINADOR ★
+[2026-06-19 18:30:10.198] [NODO-2] [V=[-]] [SISTEMA] Aceptando clientes en puerto 5003

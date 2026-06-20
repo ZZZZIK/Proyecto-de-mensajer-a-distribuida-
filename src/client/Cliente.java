@@ -27,6 +27,7 @@ public class Cliente extends JFrame {
     private String ipActual;
     private int puertoActual;
     private final int[] puertosNodos = {5001, 5002, 5003};
+    private final java.util.List<String> endpointsNodos = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     // Componentes de la interfaz gráfica
     private JTextPane areaMensajes;
@@ -496,6 +497,23 @@ public class Cliente extends JFrame {
     }
 
     /**
+     * Guarda la lista de nodos dinámicos para reconexión recibida del servidor.
+     */
+    private void guardarListaNodos(String contenido) {
+        try {
+            String datos = contenido.replace("[LISTA_NODOS]", "").trim();
+            endpointsNodos.clear();
+            if (!datos.isEmpty()) {
+                for (String ep : datos.split(",")) {
+                    endpointsNodos.add(ep.trim());
+                }
+            }
+        } catch (Exception e) {
+            // Ignorar
+        }
+    }
+
+    /**
      * Intenta reconectarse automáticamente a otro nodo disponible.
      * Recorre todos los nodos conocidos (puertos 5001, 5002, 5003)
      * excluyendo el nodo actual que falló. Realiza hasta 3 rondas de intentos.
@@ -505,51 +523,108 @@ public class Cliente extends JFrame {
             agregarMensajeSistema("\uD83D\uDD04 Intentando reconexión automática a otro nodo...");
 
             for (int intento = 0; intento < 3; intento++) {
-                for (int puerto : puertosNodos) {
-                    if (puerto == puertoActual) continue;
+                // Si tenemos la lista de endpoints dinámicos del servidor, intentamos esos primero
+                if (!endpointsNodos.isEmpty()) {
+                    for (String ep : endpointsNodos) {
+                        String[] partes = ep.split(":");
+                        if (partes.length == 2) {
+                            String host = partes[0];
+                            int puerto = Integer.parseInt(partes[1]);
+                            // Evitar reconectarse al mismo nodo actual que falló
+                            if (host.equals(ipActual) && puerto == puertoActual) continue;
 
-                    try {
-                        agregarMensajeSistema("\uD83D\uDD04 Intentando Nodo en puerto " + puerto + "...");
-                        Socket nuevoSocket = new Socket();
-                        nuevoSocket.connect(new InetSocketAddress(ipActual, puerto), 3000);
+                            try {
+                                agregarMensajeSistema("\uD83D\uDD04 Intentando reconectar a Nodo en " + host + ":" + puerto + "...");
+                                Socket nuevoSocket = new Socket();
+                                nuevoSocket.connect(new InetSocketAddress(host, puerto), 3000);
 
-                        ObjectOutputStream nuevaSalida = new ObjectOutputStream(nuevoSocket.getOutputStream());
-                        nuevaSalida.flush();
-                        ObjectInputStream nuevaEntrada = new ObjectInputStream(nuevoSocket.getInputStream());
+                                ObjectOutputStream nuevaSalida = new ObjectOutputStream(nuevoSocket.getOutputStream());
+                                nuevaSalida.flush();
+                                ObjectInputStream nuevaEntrada = new ObjectInputStream(nuevoSocket.getInputStream());
 
-                        Mensaje msgLogin = new Mensaje(nombreUsuario, "SERVIDOR",
-                                Mensaje.LOGIN, passwordGuardado);
-                        nuevaSalida.writeObject(msgLogin);
-                        nuevaSalida.flush();
+                                Mensaje msgLogin = new Mensaje(nombreUsuario, "SERVIDOR",
+                                        Mensaje.LOGIN, passwordGuardado);
+                                nuevaSalida.writeObject(msgLogin);
+                                nuevaSalida.flush();
 
-                        Mensaje respuesta = (Mensaje) nuevaEntrada.readObject();
+                                Mensaje respuesta = (Mensaje) nuevaEntrada.readObject();
 
-                        if (respuesta.getTipo().equals(Mensaje.AUTH_OK)) {
-                            socket = nuevoSocket;
-                            salida = nuevaSalida;
-                            entrada = nuevaEntrada;
-                            conectado = true;
-                            puertoActual = puerto;
+                                if (respuesta.getTipo().equals(Mensaje.AUTH_OK)) {
+                                    socket = nuevoSocket;
+                                    salida = nuevaSalida;
+                                    entrada = nuevaEntrada;
+                                    conectado = true;
+                                    puertoActual = puerto;
+                                    ipActual = host;
 
-                            agregarMensajeSistema("\u2705 ¡Reconexión exitosa al Nodo en puerto " + puerto + "!");
-                            agregarMensajeSistema(respuesta.getContenido());
+                                    agregarMensajeSistema("\u2705 ¡Reconexión exitosa al Nodo en " + host + ":" + puerto + "!");
+                                    agregarMensajeSistema(respuesta.getContenido());
 
-                            final int pFinal = puerto;
-                            SwingUtilities.invokeLater(() -> {
-                                lblEstado.setText("Reconectado: " + nombreUsuario + " [Puerto " + pFinal + "]");
-                                setTitle("WhatsApp Distribuido — " + nombreUsuario + " [Nodo:" + pFinal + "]");
-                            });
+                                    final int pFinal = puerto;
+                                    SwingUtilities.invokeLater(() -> {
+                                        lblEstado.setText("Reconectado: " + nombreUsuario + " [Puerto " + pFinal + "]");
+                                        setTitle("WhatsApp Distribuido — " + nombreUsuario + " [Nodo:" + pFinal + "]");
+                                    });
 
-                            Thread hiloReceptor = new Thread(new HiloReceptor());
-                            hiloReceptor.setDaemon(true);
-                            hiloReceptor.start();
-                            return;
-                        } else {
-                            nuevoSocket.close();
+                                    Thread hiloReceptor = new Thread(new HiloReceptor());
+                                    hiloReceptor.setDaemon(true);
+                                    hiloReceptor.start();
+                                    return;
+                                } else {
+                                    nuevoSocket.close();
+                                }
+                            } catch (Exception e) {
+                                agregarMensajeSistema("   \u2717 Nodo en " + host + ":" + puerto + " no disponible.");
+                            }
                         }
+                    }
+                } else {
+                    // Fallback a los puertos locales si no hay lista dinámica disponible
+                    for (int puerto : puertosNodos) {
+                        if (puerto == puertoActual) continue;
 
-                    } catch (Exception e) {
-                        agregarMensajeSistema("   \u2717 Nodo en puerto " + puerto + " no disponible.");
+                        try {
+                            agregarMensajeSistema("\uD83D\uDD04 Intentando Nodo en puerto " + puerto + "...");
+                            Socket nuevoSocket = new Socket();
+                            nuevoSocket.connect(new InetSocketAddress(ipActual, puerto), 3000);
+
+                            ObjectOutputStream nuevaSalida = new ObjectOutputStream(nuevoSocket.getOutputStream());
+                            nuevaSalida.flush();
+                            ObjectInputStream nuevaEntrada = new ObjectInputStream(nuevoSocket.getInputStream());
+
+                            Mensaje msgLogin = new Mensaje(nombreUsuario, "SERVIDOR",
+                                    Mensaje.LOGIN, passwordGuardado);
+                            nuevaSalida.writeObject(msgLogin);
+                            nuevaSalida.flush();
+
+                            Mensaje respuesta = (Mensaje) nuevaEntrada.readObject();
+
+                            if (respuesta.getTipo().equals(Mensaje.AUTH_OK)) {
+                                socket = nuevoSocket;
+                                salida = nuevaSalida;
+                                entrada = nuevaEntrada;
+                                conectado = true;
+                                puertoActual = puerto;
+
+                                agregarMensajeSistema("\u2705 ¡Reconexión exitosa al Nodo en puerto " + puerto + "!");
+                                agregarMensajeSistema(respuesta.getContenido());
+
+                                final int pFinal = puerto;
+                                SwingUtilities.invokeLater(() -> {
+                                    lblEstado.setText("Reconectado: " + nombreUsuario + " [Puerto " + pFinal + "]");
+                                    setTitle("WhatsApp Distribuido — " + nombreUsuario + " [Nodo:" + pFinal + "]");
+                                });
+
+                                Thread hiloReceptor = new Thread(new HiloReceptor());
+                                hiloReceptor.setDaemon(true);
+                                hiloReceptor.start();
+                                return;
+                            } else {
+                                nuevoSocket.close();
+                            }
+                        } catch (Exception e) {
+                            agregarMensajeSistema("   \u2717 Nodo en puerto " + puerto + " no disponible.");
+                        }
                     }
                 }
 
@@ -674,8 +749,14 @@ public class Cliente extends JFrame {
 
                         case Mensaje.NOTIFICACION:
                             // Notificación del sistema
-                            if (mensaje.getContenido() != null && mensaje.getContenido().contains("[METRICAS_COORD]")) {
-                                break;
+                            if (mensaje.getContenido() != null) {
+                                if (mensaje.getContenido().startsWith("[LISTA_NODOS]")) {
+                                    guardarListaNodos(mensaje.getContenido());
+                                    break;
+                                }
+                                if (mensaje.getContenido().contains("[METRICAS_COORD]")) {
+                                    break;
+                                }
                             }
                             agregarMensajeSistema(mensaje.getContenido());
                             break;
