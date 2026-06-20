@@ -1,0 +1,9 @@
+[2026-06-20 15:21:04.745] [NODO-0] [V=[-]] [SISTEMA] === LOG INICIADO — Nodo 0 — 2026-06-20 15:21:04.743 ===
+[2026-06-20 15:21:04.758] [NODO-0] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-20 15:21:04.759] [NODO-0] [V=[-]] [SISTEMA]   NODO-0 — WhatsApp Distribuido Multinodo
+[2026-06-20 15:21:04.759] [NODO-0] [V=[-]] [SISTEMA]   Puerto clientes: 5001
+[2026-06-20 15:21:04.760] [NODO-0] [V=[-]] [SISTEMA]   Puerto inter-nodo: 5101
+[2026-06-20 15:21:04.761] [NODO-0] [V=[-]] [SISTEMA]   Peers configurados: 2
+[2026-06-20 15:21:04.761] [NODO-0] [V=[-]] [SISTEMA] ════════════════════════════════════════════════
+[2026-06-20 15:21:05.108] [NODO-0] [V=[-]] [NODO] Escuchando conexiones inter-nodo en puerto 5101
+[2026-06-20 15:21:05.609] [NODO-0] [V=[-]] [NODO] Esperando conexión con peers (máximo 10 segundos)...
